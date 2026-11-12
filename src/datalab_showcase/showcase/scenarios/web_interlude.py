@@ -8,8 +8,11 @@ For booths with a single screen, the showcase hands over to DataLab Web for one
 pass of its own showcase, in a browser window, then resumes once the window is
 closed.
 
-DataLab Web plays its showcase when opened with the ``showcase`` URL parameter, and
-closes its window after one pass with ``close=1``. The browser is a Chromium-based
+The DataLab Web showcase is played by its host page (by default
+https://datalab-platform.com/web-showcase/), opened with the ``demos`` URL
+parameter (demo IDs, or ``all``): it closes its window after one pass with
+``close=1``, and follows the language (``lang``) and the pace (``speed``) of
+DataLab. The browser is a Chromium-based
 one (Google Chrome, Microsoft Edge or Chromium), started in *app* mode (a window
 without tabs nor address bar) with a dedicated profile, in the DataLab
 configuration folder: the browser process ends with its window, and the cache of
@@ -37,33 +40,37 @@ from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psutil
+from datalab.config import _ as datalab_gettext
+from datalab.config import get_config_path
 from qtpy import QtCore as QC
 
-from datalab.config import Conf, _, get_config_path
-from datalab.env import SHOWCASE_WEB_URL
-from datalab.gui.showcase.engine import (
+from datalab_showcase.core.commandline import DEFAULT_WEB_URL
+from datalab_showcase.i18n import _
+from datalab_showcase.showcase.engine import (
     ScenarioSkipped,
     ShowcaseScenario,
     process_events,
 )
-from datalab.gui.showcase.foreground import bring_to_front
+from datalab_showcase.showcase.foreground import bring_to_front
+from datalab_showcase.showcase.settings import load_settings
 
 if TYPE_CHECKING:
     from datalab.gui.main import DLMainWindow
-    from datalab.gui.showcase.engine import ShowcaseContext
 
-logger = logging.getLogger("datalab.showcase")
+    from datalab_showcase.showcase.engine import ShowcaseContext
+
+logger = logging.getLogger("datalab_showcase")
 
 #: ID of the interlude, in the list of the scenarios to play
 SCENARIO_ID = "web"
-#: Public deployment of DataLab Web
-DEFAULT_URL = SHOWCASE_WEB_URL
+#: Host page of the DataLab Web showcase
+DEFAULT_URL = DEFAULT_WEB_URL
 #: Folder of the browser profile, in the DataLab configuration folder
 PROFILE_DIRNAME = "showcase-browser"
 #: Languages of DataLab Web (other languages of DataLab fall back to English)
 WEB_LANGUAGES = ("en", "fr")
 #: URL parameters set by the interlude (the other parameters of the URL are kept)
-INTERLUDE_PARAMETERS = ("showcase", "loop", "close", "lang", "speed")
+INTERLUDE_PARAMETERS = ("demos", "showcase", "loop", "close", "lang", "speed")
 #: Delay (s, at normal pace) between the start of the browser and the minimization
 #: of the main window, behind the browser window
 WINDOW_SWAP_DELAY = 2.0
@@ -138,7 +145,7 @@ def get_ui_language() -> str:
     Returns:
         Language code (``'en'`` or ``'fr'``)
     """
-    translations = getattr(_, "__self__", None)
+    translations = getattr(datalab_gettext, "__self__", None)
     info = translations.info() if translations is not None else {}
     language = (info.get("language") or "en").replace("-", "_").split("_")[0]
     language = language.lower()
@@ -155,12 +162,13 @@ def build_web_url(
     its window
 
     The parameters of the base URL are kept (e.g. ``runtime=main``), except those
-    set by the interlude: no loop, window closed after one pass, language and pace
-    of DataLab. A ``showcase`` parameter of the base URL is kept, unless demo IDs
-    are given.
+    set by the interlude: demos to play, window closed after one pass, language and
+    pace of DataLab (``showcase`` and ``loop`` parameters are removed). A ``demos``
+    parameter of the base URL is kept, unless demo IDs are given.
 
     Args:
-        base_url: URL of DataLab Web (e.g. ``https://datalab-platform.com/web/``)
+        base_url: URL of the DataLab Web showcase (e.g.
+         ``https://datalab-platform.com/web-showcase/``)
         ids: IDs of the DataLab Web demos to play (None: all the demos)
         language: Language of DataLab Web (e.g. ``'fr'``)
         speed: Delay factor of the demos (0: default pace)
@@ -177,14 +185,14 @@ def build_web_url(
     ):
         raise ScenarioSkipped(f"Invalid DataLab Web URL: {base_url!r}")
     query = parse_qsl(parts.query, keep_blank_values=True)
-    showcase = "1"
+    demos = "all"
     for key, value in query:
-        if key == "showcase" and value:
-            showcase = value
+        if key == "demos" and value:
+            demos = value
     if ids:
-        showcase = ",".join(ids)
+        demos = ",".join(ids)
     params = [(key, value) for key, value in query if key not in INTERLUDE_PARAMETERS]
-    params += [("showcase", showcase), ("close", "1"), ("lang", language)]
+    params += [("demos", demos), ("close", "1"), ("lang", language)]
     if speed > 0:
         params.append(("speed", f"{speed:g}"))
     return urlunsplit(parts._replace(query=urlencode(params, safe=",")))
@@ -598,6 +606,30 @@ def restore_window(win: DLMainWindow, state: QC.Qt.WindowStates) -> None:
     process_events()
 
 
+def get_interlude_parameters(
+    ids: list[str] | None = None, timeout: float | None = None
+) -> tuple[list[str] | None, float]:
+    """Return the DataLab Web demos to play and the maximum duration of the
+    interlude, from the settings of the showcase unless given
+
+    Args:
+        ids: IDs of the DataLab Web demos to play (default: ``web_ids`` setting,
+         all the demos by default)
+        timeout: Maximum duration (s) of the interlude (default: ``web_timeout``
+         setting, in minutes)
+
+    Returns:
+        IDs of the demos (None: all the demos) and maximum duration (s)
+    """
+    if ids is None or timeout is None:
+        settings = load_settings()
+        if ids is None:
+            ids = parse_ids(settings.web_ids)
+        if timeout is None:
+            timeout = 60.0 * max(1, settings.web_timeout)
+    return ids, timeout
+
+
 def play(
     ctx: ShowcaseContext,
     url: str | None,
@@ -609,10 +641,10 @@ def play(
     Args:
         ctx: Showcase context
         url: URL of DataLab Web (None or empty: the interlude is skipped)
-        ids: IDs of the DataLab Web demos to play (default: from the configuration,
-         all the demos by default)
-        timeout: Maximum duration (s) of the interlude (default: from the
-         configuration): the browser is closed afterwards
+        ids: IDs of the DataLab Web demos to play (default: from the settings of
+         the showcase, all the demos by default)
+        timeout: Maximum duration (s) of the interlude (default: from the settings
+         of the showcase): the browser is closed afterwards
 
     Raises:
         ScenarioSkipped: Without URL, with an invalid URL, or without browser
@@ -622,10 +654,7 @@ def play(
             "No DataLab Web URL ('Include DataLab Web' option of the Showcase mode "
             "dialog, or --showcase-web command-line option)"
         )
-    if ids is None:
-        ids = parse_ids(Conf.showcase_web_ids.get())
-    if timeout is None:
-        timeout = 60.0 * max(1, Conf.showcase_web_timeout.get())
+    ids, timeout = get_interlude_parameters(ids, timeout)
     web_url = build_web_url(url, ids, get_ui_language(), ctx.speed)
     browser = find_browser()
     if browser is None:
@@ -675,9 +704,10 @@ def create_scenario(
 
     Args:
         url: URL of DataLab Web (None or empty: the interlude is skipped)
-        ids: IDs of the DataLab Web demos to play (default: from the configuration)
-        timeout: Maximum duration (s) of the interlude (default: from the
-         configuration)
+        ids: IDs of the DataLab Web demos to play (default: from the settings of
+         the showcase)
+        timeout: Maximum duration (s) of the interlude (default: from the settings
+         of the showcase)
 
     Returns:
         Scenario

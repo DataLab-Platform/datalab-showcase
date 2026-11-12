@@ -4,7 +4,7 @@
 Showcase player
 ===============
 
-The :mod:`datalab.gui.showcase.player` module gathers the showcase scenarios (the
+The :mod:`datalab_showcase.showcase.player` module gathers the showcase scenarios (the
 native ones and those generated for the active application plugins) and plays
 them in the DataLab main window, once or in a loop.
 """
@@ -14,30 +14,31 @@ from __future__ import annotations
 import gc
 import logging
 import traceback
-from collections.abc import Generator, Iterable, Sequence
-from contextlib import contextmanager
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
+from datalab.env import execenv
 from qtpy import QtCore as QC
 from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 
-from datalab.env import execenv
-from datalab.gui.showcase import applications
-from datalab.gui.showcase.engine import (
+from datalab_showcase.showcase import applications
+from datalab_showcase.showcase.engine import (
     ScenarioSkipped,
     ShowcaseContext,
     ShowcaseScenario,
     is_headless,
 )
-from datalab.gui.showcase.foreground import bring_to_front
-from datalab.gui.showcase.scenarios import get_native_scenarios, web_interlude
+from datalab_showcase.showcase.foreground import bring_to_front
+from datalab_showcase.showcase.scenarios import get_native_scenarios, web_interlude
 
 if TYPE_CHECKING:
     from datalab.gui.main import DLMainWindow
 
-logger = logging.getLogger("datalab.showcase")
+    from datalab_showcase.core.commandline import ShowcaseRequest
+
+logger = logging.getLogger("datalab_showcase")
 
 #: Speed of each pace proposed in the Showcase mode dialog
 PACE_SPEEDS = {"slow": 1.5, "normal": 1.0, "fast": 0.7}
@@ -74,7 +75,7 @@ class ShowcaseOptions:
         screen: Index of the screen showing the main window (None: current one)
         web_url: URL of DataLab Web, to end each loop with the DataLab Web
          interlude (None: no interlude, unless its ID is in ``scenario_ids``), see
-         :mod:`datalab.gui.showcase.scenarios.web_interlude`
+         :mod:`datalab_showcase.showcase.scenarios.web_interlude`
     """
 
     scenario_ids: list[str] | None = None
@@ -85,20 +86,24 @@ class ShowcaseOptions:
     web_url: str | None = None
 
     @classmethod
-    def from_execenv(cls) -> ShowcaseOptions:
-        """Return the options given on the command line (``--showcase`` options)
+    def from_request(cls, request: ShowcaseRequest) -> ShowcaseOptions:
+        """Return the options requested on the command line (``--showcase``
+        options, see :mod:`datalab_showcase.core.commandline`)
+
+        Args:
+            request: Showcase request
 
         Returns:
             Showcase options
         """
-        speed = execenv.showcase_speed
+        speed = request.speed
         return cls(
-            scenario_ids=parse_scenario_ids(execenv.showcase),
-            loop=execenv.showcase_loop,
+            scenario_ids=parse_scenario_ids(request.scenarios),
+            loop=request.loop,
             speed=1.0 if speed is None else max(speed, 0.0),
-            fullscreen=execenv.showcase_fullscreen,
-            screen=execenv.showcase_screen,
-            web_url=execenv.showcase_web,
+            fullscreen=request.fullscreen,
+            screen=request.screen,
+            web_url=request.web_url,
         )
 
 
@@ -137,7 +142,7 @@ def get_showcase_scenarios(win: DLMainWindow) -> list[ShowcaseScenario]:
     """Return the available showcase scenarios
 
     The native scenarios alternate with the scenarios generated for the active
-    application plugins (see :mod:`datalab.gui.showcase.applications`).
+    application plugins (see :mod:`datalab_showcase.showcase.applications`).
 
     Args:
         win: DataLab main window
@@ -380,36 +385,21 @@ def play_showcase(
     return ShowcasePlayer(win, selected, options).play()
 
 
-def play_from_command_line(win: DLMainWindow) -> list[ScenarioResult]:
-    """Play the showcase requested on the command line (``--showcase`` options)
-
-    Args:
-        win: DataLab main window
-
-    Returns:
-        Results of the scenarios played
-    """
-    return play_showcase(win, ShowcaseOptions.from_execenv())
-
-
-@contextmanager
-def quiet_startup() -> Generator[None, None, None]:
-    """Run the startup actions of DataLab without any question, for a showcase
-
-    Startup questions (e.g. about the log files of a previous session) would block
-    a showcase started from the command line, which may run unattended.
-
-    Yields:
-        None
-    """
-    state = (execenv.unattended, execenv.do_not_quit)
-    execenv.unattended = execenv.do_not_quit = True
-    try:
-        yield
-    finally:
-        execenv.unattended, execenv.do_not_quit = state
-
-
 def is_showcase_playing() -> bool:
     """Return True while a showcase is playing"""
     return ShowcasePlayer.active is not None
+
+
+def stop_showcase() -> bool:
+    """Ask the showcase playing (if any) to stop after the current demo, as the
+    operator does with Shift+F12
+
+    Returns:
+        True if a showcase is playing
+    """
+    player = ShowcasePlayer.active
+    if player is None:
+        return False
+    if player.context is not None:
+        player.context.request_stop()
+    return True

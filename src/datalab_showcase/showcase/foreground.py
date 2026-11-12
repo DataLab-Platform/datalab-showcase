@@ -4,7 +4,7 @@
 Showcase window activation
 ==========================
 
-The :mod:`datalab.gui.showcase.foreground` module brings the DataLab main window
+The :mod:`datalab_showcase.showcase.foreground` module brings the DataLab main window
 to the foreground when a showcase starts, even when another application is
 active.
 
@@ -22,9 +22,9 @@ import sys
 
 from qtpy import QtWidgets as QW
 
-from datalab.gui.showcase.engine import is_headless
+from datalab_showcase.showcase.engine import is_headless
 
-logger = logging.getLogger("datalab.showcase")
+logger = logging.getLogger("datalab_showcase")
 
 
 def _activate_windows_window(hwnd: int) -> bool:

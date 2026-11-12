@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import sigima.params
 import sigima.proc.signal as sips
+from datalab.env import execenv
+from datalab.gui.processor.base import extract_processing_parameters
 from guidata.qthelpers import is_qobject_valid
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
@@ -37,19 +39,17 @@ from sigima.tests.data import create_paracetamol_signal
 from sigima.tools.signal import fitting
 from sigima.tools.signal.peakdetection import peak_indices
 
-from datalab.config import _
-from datalab.env import execenv
-from datalab.gui.processor.base import extract_processing_parameters
-from datalab.gui.showcase.engine import ShowcaseScenario
-from datalab.gui.showcase.scenarios.d3_dialogs import drive_dialogs
+from datalab_showcase.i18n import _, datalab_text
+from datalab_showcase.showcase.engine import ShowcaseScenario
+from datalab_showcase.showcase.scenarios.d3_dialogs import drive_dialogs
 
 if TYPE_CHECKING:
-    from sigima.objects import SignalObj
-
     from datalab.gui.panel.history.panel import HistoryPanel
     from datalab.gui.panel.signal import SignalPanel
-    from datalab.gui.showcase.engine import ShowcaseContext
     from datalab.history import HistoryAction
+    from sigima.objects import SignalObj
+
+    from datalab_showcase.showcase.engine import ShowcaseContext
 
 #: Size of the moving window of the smoothing: first value, then upstream change
 SMOOTHING_WINDOWS = (3, 15)
@@ -291,7 +291,7 @@ def build_chain(
     ctx.checkpoint(detrended is not smoothed, "No detrended signal")
 
     ctx.say(_("Detect the diffraction peaks"), hold=1.5)
-    action = find_panel_action(panel, _("Peak detection..."))
+    action = find_panel_action(panel, datalab_text("Peak detection..."))
     if ctx.check:
         param = sips.PeakDetectionParam.create(threshold=PEAK_THRESHOLD, min_dist=1)
         panel.processor.compute_peak_detection(param)
@@ -301,7 +301,7 @@ def build_chain(
     ctx.pause(1.0)
 
     ctx.say(_("Fit the peaks with a sum of Gaussians"), hold=1.5)
-    title = _("Multi-Gaussian fit")
+    title = datalab_text("Multi-Gaussian fit")
     if ctx.check:
         panel.processor.compute_fit(title, fit_peaks)
     else:

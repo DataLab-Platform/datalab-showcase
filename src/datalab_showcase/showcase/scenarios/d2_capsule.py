@@ -35,23 +35,23 @@ from typing import TYPE_CHECKING
 import numpy as np
 import sigima.objects
 import sigima.proc.image as sipi
+from datalab.adapters_metadata import GeometryAdapter
+from datalab.capsulestore import RevisionStore
+from datalab.widgets.capsule import CapsuleDialog, short_id
 from datalab_capsule import exchange
 from datalab_capsule.archive import read_capsule
 from datalab_capsule.manifest import inspect_manifest
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
-from datalab.adapters_metadata import GeometryAdapter
-from datalab.capsulestore import RevisionStore
-from datalab.config import _
-from datalab.gui.showcase.engine import ShowcaseScenario
-from datalab.widgets.capsule import CapsuleDialog, short_id
+from datalab_showcase.i18n import _
+from datalab_showcase.showcase.engine import ShowcaseScenario
 
 if TYPE_CHECKING:
+    from datalab.gui.main import DLMainWindow
     from sigima.objects import ImageObj
 
-    from datalab.gui.main import DLMainWindow
-    from datalab.gui.showcase.engine import ShowcaseContext
+    from datalab_showcase.showcase.engine import ShowcaseContext
 
 #: Title of the raw image
 CELLS_TITLE = "Cells"

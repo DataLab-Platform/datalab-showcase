@@ -12,12 +12,14 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from datalab.env import execenv
+from datalab.plugins import PluginRegistry
+from datalab.tests import datalab_test_app_context, record_shown_windows
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
+from support.plugins import application_plugin as _plugin
 
-from datalab.config import Conf
-from datalab.env import execenv
-from datalab.gui.showcase import (
+from datalab_showcase.showcase import (
     ScenarioSkipped,
     ShowcaseDialog,
     ShowcaseOptions,
@@ -28,11 +30,13 @@ from datalab.gui.showcase import (
     player,
     show_showcase_dialog,
 )
-from datalab.gui.showcase import dialog as dialog_module
-from datalab.gui.showcase.scenarios import get_native_scenarios
-from datalab.plugins import PluginRegistry
-from datalab.tests import datalab_test_app_context, record_shown_windows
-from datalab.tests.features.plugins.applications_panel_test import _plugin
+from datalab_showcase.showcase import dialog as dialog_module
+from datalab_showcase.showcase.scenarios import get_native_scenarios
+from datalab_showcase.showcase.settings import (
+    ShowcaseSettings,
+    load_settings,
+    save_settings,
+)
 
 
 def accept_dialog(dialog: QW.QDialog) -> int:
@@ -128,8 +132,6 @@ def test_application_scenarios(registry: list) -> None:
 def test_showcase_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
     """The dialog shows no transient window, remembers the choices and plays"""
     with datalab_test_app_context(console=False) as win:
-        action_texts = [action.text() for action in win.help_menu.actions()]
-        assert any(text.startswith("Showcase mode") for text in action_texts)
         scenarios = get_showcase_scenarios(win)
         ids = [scenario.id for scenario in scenarios]
         with record_shown_windows() as shown:
@@ -139,11 +141,11 @@ def test_showcase_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
         dialog.scenario_list.item(1).setCheckState(QC.Qt.Unchecked)
         dialog.accept()
         assert dialog.options.scenario_ids == [ids[0]] + ids[2:]
-        assert Conf.showcase_excluded_scenarios.get() == [ids[1]]
+        assert load_settings().excluded_scenarios == [ids[1]]
         dialog = ShowcaseDialog(win, scenarios)
         assert dialog.get_selected_ids() == [ids[0]] + ids[2:]
         # The dialog is accepted by the unattended mode: only D1 is played
-        Conf.showcase_excluded_scenarios.set(ids[1:])
+        save_settings(ShowcaseSettings(excluded_scenarios=ids[1:]))
         monkeypatch.setitem(player.PACE_SPEEDS, "normal", 0.0)
         # A dialog executed after another test is rejected at once: accept it here
         monkeypatch.setattr(dialog_module, "exec_dialog", accept_dialog)

@@ -12,7 +12,7 @@ Macros and remote control:
 3. A separate Python process, as a Jupyter notebook would, drives DataLab through
    the Web API: it sends noisy acquisitions, one by one, asks DataLab for their
    average, then retrieves the result (see
-   :mod:`datalab.gui.showcase.scenarios.d4_remote`).
+   :mod:`datalab_showcase.showcase.scenarios.d4_remote`).
 4. The Web API server is stopped.
 
 The scenario leaves no trace behind: the macro is removed, along with its entry
@@ -30,27 +30,28 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from datalab.env import execenv
+from datalab.webapi import webapi_unavailable_message
+from datalab.widgets.codecompleter import PythonCompleter
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
-from datalab.config import _
-from datalab.env import execenv
-from datalab.gui.showcase.engine import ScenarioSkipped, ShowcaseScenario
-from datalab.gui.showcase.scenarios.d4_remote import (
+from datalab_showcase.i18n import _, datalab_text
+from datalab_showcase.showcase.engine import ScenarioSkipped, ShowcaseScenario
+from datalab_showcase.showcase.scenarios.d4_remote import (
     RESULT_PREFIX,
     ClientConsole,
     ClientProcess,
     is_serving,
 )
-from datalab.webapi import webapi_unavailable_message
-from datalab.widgets.codecompleter import PythonCompleter
 
 if TYPE_CHECKING:
     from datalab.gui.macroeditor import Macro
     from datalab.gui.main import DLMainWindow
-    from datalab.gui.showcase.engine import ShowcaseContext
 
-logger = logging.getLogger("datalab.showcase")
+    from datalab_showcase.showcase.engine import ShowcaseContext
+
+logger = logging.getLogger("datalab_showcase")
 
 #: Title of the macro written by the scenario
 MACRO_TITLE = "chirp_analysis"
@@ -403,7 +404,7 @@ def play_remote_control(ctx: ShowcaseContext) -> None:
     with keep_connection_file():
         try:
             if started:
-                start_action = find_action(win, _("Start Web API Server"))
+                start_action = find_action(win, datalab_text("Start Web API Server"))
                 if start_action is not None:
                     ctx.point_action(start_action)
                 info = win.start_webapi_server()
@@ -424,7 +425,7 @@ def play_remote_control(ctx: ShowcaseContext) -> None:
                 )
             play_client(ctx, url, token)
             if started:
-                stop_action = find_action(win, _("Stop Web API Server"))
+                stop_action = find_action(win, datalab_text("Stop Web API Server"))
                 if stop_action is not None:
                     ctx.point_action(stop_action)
                 win.stop_webapi_server()

@@ -17,23 +17,7 @@ from types import SimpleNamespace
 import guidata.dataset as gds
 import numpy as np
 import pytest
-from qtpy import QtCore as QC
-from qtpy import QtWidgets as QW
-from sigima.objects import TableResult, create_signal
-
 from datalab.config import Conf
-from datalab.gui.showcase import ShowcaseContext, ShowcaseOptions, play_showcase
-from datalab.gui.showcase import applications as showcase_applications
-from datalab.gui.showcase.applications_plan import (
-    MAX_RECIPE_RUNS,
-    MAX_RESULT_ROWS,
-    ApplicationDemoPlan,
-    count_result_rows,
-    main_output,
-    plan_application_demo,
-    plan_examples,
-    plan_tool,
-)
 from datalab.plugins import PluginBase, PluginCapability, PluginInfo, PluginRegistry
 from datalab.plugins.examples import PluginExample, PluginExampleData
 from datalab.plugins.instruments import (
@@ -52,7 +36,23 @@ from datalab.plugins.recipes import (
 )
 from datalab.plugins.tools import PluginTool
 from datalab.tests import datalab_test_app_context
-from datalab.tests.features.plugins.applications_panel_test import _plugin
+from qtpy import QtCore as QC
+from qtpy import QtWidgets as QW
+from sigima.objects import TableResult, create_signal
+from support.plugins import application_plugin as _plugin
+
+from datalab_showcase.showcase import ShowcaseContext, ShowcaseOptions, play_showcase
+from datalab_showcase.showcase import applications as showcase_applications
+from datalab_showcase.showcase.applications_plan import (
+    MAX_RECIPE_RUNS,
+    MAX_RESULT_ROWS,
+    ApplicationDemoPlan,
+    count_result_rows,
+    main_output,
+    plan_application_demo,
+    plan_examples,
+    plan_tool,
+)
 
 METHODS_ID = "org.example.showcase-methods"
 INSTRUMENT_ID = "org.example.showcase-instrument"

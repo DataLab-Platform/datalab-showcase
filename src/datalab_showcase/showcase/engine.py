@@ -4,7 +4,7 @@
 Showcase engine
 ===============
 
-The :mod:`datalab.gui.showcase.engine` module provides the building blocks of the
+The :mod:`datalab_showcase.showcase.engine` module provides the building blocks of the
 showcase mode: live and unattended demos of DataLab, for exhibitions and booths,
 written like end-to-end test scenarios.
 
@@ -32,6 +32,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import sigima.proc.signal as sips
+from datalab.env import execenv
+from datalab.gui.processor.base import WorkerState
+from datalab.gui.tour import Cover
 from guidata.configtools import get_icon
 from guidata.qthelpers import is_qobject_valid
 from qtpy import QtCore as QC
@@ -39,19 +42,16 @@ from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 from sigima.objects import create_signal
 
-from datalab.config import _
-from datalab.env import execenv
-from datalab.gui.processor.base import WorkerState
-from datalab.gui.tour import Cover
+from datalab_showcase.i18n import _
 
 if TYPE_CHECKING:
-    from sigima.objects import ImageObj, SignalObj
-
     from datalab.gui.main import DLMainWindow
     from datalab.gui.panel.base import BaseDataPanel
+    from datalab.gui.plugins.applications import ApplicationsPanel
     from datalab.gui.processor.base import Worker
+    from sigima.objects import ImageObj, SignalObj
 
-logger = logging.getLogger("datalab.showcase")
+logger = logging.getLogger("datalab_showcase")
 
 #: Qt platforms without any screen: the mouse pointer is not animated
 HEADLESS_PLATFORMS = ("offscreen", "minimal")
@@ -99,6 +99,27 @@ def plain_text(text: str) -> str:
     """
     marker = chr(0)
     return text.replace("&&", marker).replace("&", "").replace(marker, "&")
+
+
+def clear_application_outcomes(panel: ApplicationsPanel) -> None:
+    """Hide the outcomes of the previous runs, on the pages of all the applications
+    of the Applications panel (e.g. once the workspace holding the objects they
+    created is cleared)
+
+    .. note::
+
+        The Applications panel of DataLab 1.4 has no public method for this: its
+        widgets are used directly (``application_pages``, ``recipe_rows`` and
+        ``outcome_label``), as the plugin requires DataLab 1.4.x.
+
+    Args:
+        panel: Applications panel of the DataLab main window
+    """
+    for page in panel.application_pages:
+        labels = [row.outcome_label for row in page.recipe_rows.values()]
+        for label in [*labels, page.outcome_label]:
+            label.hide()
+            label.clear()
 
 
 class ScenarioSkipped(Exception):
@@ -1649,7 +1670,7 @@ class ShowcaseContext:
         self.hide_caption()
         self.close_stray_windows()
         win.docks[win.applicationspanel].hide()
-        win.applicationspanel.clear_outcomes()
+        clear_application_outcomes(win.applicationspanel)
         win.reset_all()
         win.historypanel.remove_all_objects()
         win.set_current_panel("signal")

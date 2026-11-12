@@ -9,13 +9,13 @@ Waiting loops, captions, modal-dialog guard and warm-up of the processing worker
 from __future__ import annotations
 
 import pytest
+from datalab.env import execenv
+from datalab.gui.processor.base import WorkerState
+from datalab.tests import datalab_test_app_context
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
-from datalab.env import execenv
-from datalab.gui.processor.base import WorkerState
-from datalab.gui.showcase.engine import ShowcaseContext, process_events
-from datalab.tests import datalab_test_app_context
+from datalab_showcase.showcase.engine import ShowcaseContext, process_events
 
 
 @pytest.mark.parametrize("speed", [0.0, 0.01])

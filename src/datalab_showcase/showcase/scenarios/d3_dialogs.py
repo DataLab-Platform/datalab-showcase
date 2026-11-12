@@ -26,24 +26,24 @@ import numpy as np
 import sigima.objects
 import sigima.params
 import sigima.proc.image
+from datalab.env import execenv
 from guidata.dataset.qtwidgets import DataSetEditLayout
 from guidata.qthelpers import is_qobject_valid
 from qtpy import QtCore as QC
 from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 
-from datalab.config import _
-from datalab.env import execenv
+from datalab_showcase.i18n import datalab_text
 
 if TYPE_CHECKING:
+    from datalab.gui.main import DLMainWindow
+    from datalab.widgets.processingpreview import ProcessingPreviewDialog
     from guidata.dataset.qtitemwidgets import AbstractDataSetWidget, SliderWidget
     from plotpy.plot import BasePlot
 
-    from datalab.gui.main import DLMainWindow
-    from datalab.gui.showcase.engine import ShowcaseContext
-    from datalab.widgets.processingpreview import ProcessingPreviewDialog
+    from datalab_showcase.showcase.engine import ShowcaseContext
 
-logger = logging.getLogger("datalab.showcase")
+logger = logging.getLogger("datalab_showcase")
 
 #: Driver of a modal dialog: called with the dialog while it is executed, it is
 #: expected to close it (e.g. by clicking on *OK*)
@@ -435,7 +435,7 @@ class PreviewWatcher(QC.QObject):
 
     def is_up_to_date(self) -> bool:
         """Return True if the preview matches the current parameters"""
-        return self.preview.status.text() == _("Preview up to date")
+        return self.preview.status.text() == datalab_text("Preview up to date")
 
     def wait_for_update(
         self, ctx: ShowcaseContext, since: int, timeout: float = 30.0

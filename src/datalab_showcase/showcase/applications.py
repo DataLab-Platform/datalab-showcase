@@ -4,12 +4,12 @@
 Showcase scenarios of the application plugins
 =============================================
 
-The :mod:`datalab.gui.showcase.applications` module generates a showcase scenario
+The :mod:`datalab_showcase.showcase.applications` module generates a showcase scenario
 for each active application plugin (plugin with the ``APPLICATION`` capability):
 the installed applications take part in the showcase without any specific code.
 
 The demo of an application is derived from the contracts it declares (see
-:mod:`datalab.gui.showcase.applications_plan`), and played in the real
+:mod:`datalab_showcase.showcase.applications_plan`), and played in the real
 Applications panel:
 
 1. The application is presented with its name and description.
@@ -35,16 +35,18 @@ from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING
 
+from datalab.config import Conf
+from datalab.env import execenv
+from datalab.gui.plugins.applications import get_application_plugins
+from datalab.gui.plugins.instrument import InstrumentWindow
+from datalab.plugins.recipe_binding import RecipeReadinessStatus
 from guidata.qthelpers import is_qobject_valid
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 from sigima.objects import SignalObj
 
-from datalab.config import Conf, _
-from datalab.env import execenv
-from datalab.gui.plugins.applications import get_application_plugins
-from datalab.gui.plugins.instrument import InstrumentWindow
-from datalab.gui.showcase.applications_plan import (
+from datalab_showcase.i18n import _, datalab_text
+from datalab_showcase.showcase.applications_plan import (
     MAX_RESULT_ROWS,
     ApplicationDemoPlan,
     ExamplePlay,
@@ -54,20 +56,23 @@ from datalab.gui.showcase.applications_plan import (
     main_output,
     plan_application_demo,
 )
-from datalab.gui.showcase.engine import ScenarioSkipped, ShowcaseScenario, plain_text
-from datalab.plugins.recipe_binding import RecipeReadinessStatus
+from datalab_showcase.showcase.engine import (
+    ScenarioSkipped,
+    ShowcaseScenario,
+    plain_text,
+)
 
 if TYPE_CHECKING:
-    from sigima.objects import ImageObj
-
     from datalab.gui.main import DLMainWindow
     from datalab.gui.panel.base import BaseDataPanel
     from datalab.gui.plugins.applications import ApplicationPage
-    from datalab.gui.showcase.engine import ShowcaseContext
     from datalab.plugins import PluginBase
     from datalab.plugins.recipes import RecipeOutcome
+    from sigima.objects import ImageObj
 
-logger = logging.getLogger("datalab.showcase")
+    from datalab_showcase.showcase.engine import ShowcaseContext
+
+logger = logging.getLogger("datalab_showcase")
 
 #: Prefix of the IDs of the scenarios generated for the application plugins
 SCENARIO_ID_PREFIX = "app:"
@@ -418,7 +423,7 @@ class ApplicationStage:
                 hold=4.0,
             )
         if outcome.results and count_result_rows(outcome) <= MAX_RESULT_ROWS:
-            action = find_panel_action(panel, _("Show results") + "...")
+            action = find_panel_action(panel, datalab_text("Show results") + "...")
             if action is not None and action.isEnabled():
                 ctx.say(
                     _("Its measurements are attached to the result, in a table"),

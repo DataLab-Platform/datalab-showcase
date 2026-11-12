@@ -31,7 +31,7 @@ from qtpy import QtCore as QC
 from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 
-logger = logging.getLogger("datalab.showcase")
+logger = logging.getLogger("datalab_showcase")
 
 #: Prefix of the last line written by the client: its result, as JSON
 RESULT_PREFIX = "RESULT "

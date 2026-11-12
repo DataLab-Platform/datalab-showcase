@@ -4,9 +4,9 @@
 Demo plans of the application plugins
 ======================================
 
-The :mod:`datalab.gui.showcase.applications_plan` module derives, from the
+The :mod:`datalab_showcase.showcase.applications_plan` module derives, from the
 contracts declared by an application plugin, what the showcase demo of this
-application plays (see :mod:`datalab.gui.showcase.applications`):
+application plays (see :mod:`datalab_showcase.showcase.applications`):
 
 - the examples designed for a method (:class:`~datalab.plugins.PluginExample`
   with recipe IDs), in their declared order: each one is tried with the first
@@ -28,19 +28,17 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, TypeVar
 
+from datalab.plugins.tools import ToolSelection
 from sigima.objects import GeometryResult, TableResult
 
-from datalab.plugins.tools import ToolSelection
-
 if TYPE_CHECKING:
-    from sigima.objects import ImageObj, SignalObj
-
     from datalab.plugins import PluginBase
     from datalab.plugins.examples import PluginExample
     from datalab.plugins.recipes import RecipeDescriptor, RecipeOutcome
     from datalab.plugins.tools import PluginTool
+    from sigima.objects import ImageObj, SignalObj
 
-logger = logging.getLogger("datalab.showcase")
+logger = logging.getLogger("datalab_showcase")
 
 #: Maximum number of examples tried in the demo of an application
 MAX_EXAMPLES = 2

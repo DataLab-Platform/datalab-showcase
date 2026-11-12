@@ -16,9 +16,10 @@ import os.path as osp
 import tempfile
 
 from datalab.config import Conf
-from datalab.gui.showcase import ShowcaseOptions, ShowcasePlayer
-from datalab.gui.showcase.scenarios import d2_capsule
 from datalab.tests import datalab_test_app_context
+
+from datalab_showcase.showcase import ShowcaseOptions, ShowcasePlayer
+from datalab_showcase.showcase.scenarios import d2_capsule
 
 
 def test_cells_image_is_reproducible() -> None:

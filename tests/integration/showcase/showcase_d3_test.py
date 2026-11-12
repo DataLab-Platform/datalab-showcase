@@ -16,18 +16,18 @@ from concurrent.futures import Future
 
 import pytest
 import sigima.params
+from datalab.config import Conf
+from datalab.env import execenv
+from datalab.gui.processor.base import run_with_env
+from datalab.gui.processor.preview import PreviewExecutorCache
+from datalab.tests import datalab_test_app_context
 from guidata import qthelpers
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 from sigima.config import options as sigima_options
 
-from datalab.config import Conf
-from datalab.env import execenv
-from datalab.gui.processor.base import run_with_env
-from datalab.gui.processor.preview import PreviewExecutorCache
-from datalab.gui.showcase import ShowcaseOptions, engine, play_showcase, player
-from datalab.gui.showcase.scenarios import d3_image_analysis
-from datalab.tests import datalab_test_app_context
+from datalab_showcase.showcase import ShowcaseOptions, engine, play_showcase, player
+from datalab_showcase.showcase.scenarios import d3_image_analysis
 
 
 class InlineExecutor:

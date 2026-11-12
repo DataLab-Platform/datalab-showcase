@@ -14,7 +14,7 @@ import pytest
 from guidata.qthelpers import qt_app_context
 from qtpy import QtWidgets as QW
 
-from datalab.gui.showcase import foreground
+from datalab_showcase.showcase import foreground
 
 
 @pytest.fixture(name="activations")

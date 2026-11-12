@@ -8,50 +8,39 @@ Command-line options and scenario selection of the showcase mode.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
-from datalab.env import SHOWCASE_WEB_URL, DLExecEnv
-from datalab.gui.showcase import player
-from datalab.gui.showcase.engine import ScenarioSkipped, ShowcaseScenario
-from datalab.gui.showcase.player import (
+from datalab_showcase.core.commandline import DEFAULT_WEB_URL, parse_arguments
+from datalab_showcase.showcase.engine import ScenarioSkipped, ShowcaseScenario
+from datalab_showcase.showcase.player import (
     ShowcaseOptions,
     interleave,
     parse_scenario_ids,
     select_scenarios,
 )
-from datalab.gui.showcase.scenarios import get_native_scenarios
+from datalab_showcase.showcase.scenarios import get_native_scenarios
 
 
-def _parse(monkeypatch: pytest.MonkeyPatch, *args: str) -> DLExecEnv:
-    """Return an execution environment parsing command-line arguments"""
-    monkeypatch.setattr(sys, "argv", ["datalab", *args])
-    return DLExecEnv()
-
-
-def test_showcase_command_line_options(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_showcase_command_line_options() -> None:
     """All the showcase options are parsed, and give the showcase options"""
-    env = _parse(
-        monkeypatch,
-        "--showcase",
-        "d1,d3",
-        "--showcase-loop",
-        "--showcase-speed",
-        "0.7",
-        "--showcase-screen",
-        "1",
-        "--showcase-fullscreen",
-        "--showcase-web",
-        "http://localhost:5173/",
+    parsed = parse_arguments(
+        [
+            "--showcase=d1,d3",
+            "--showcase-loop",
+            "--showcase-speed=0.7",
+            "--showcase-screen=1",
+            "--showcase-fullscreen",
+            "--showcase-web=http://localhost:5173/",
+        ]
     )
-    assert env.showcase == "d1,d3"
-    assert env.showcase_loop and env.showcase_fullscreen
-    assert env.showcase_speed == pytest.approx(0.7)
-    assert env.showcase_screen == 1
-    assert env.showcase_web == "http://localhost:5173/"
-    monkeypatch.setattr(player, "execenv", env)
-    assert ShowcaseOptions.from_execenv() == ShowcaseOptions(
+    assert not parsed.warnings
+    request = parsed.request
+    assert request.scenarios == "d1,d3"
+    assert request.loop and request.fullscreen
+    assert request.speed == pytest.approx(0.7)
+    assert request.screen == 1
+    assert request.web_url == "http://localhost:5173/"
+    assert ShowcaseOptions.from_request(request) == ShowcaseOptions(
         scenario_ids=["d1", "d3"],
         loop=True,
         speed=0.7,
@@ -59,20 +48,20 @@ def test_showcase_command_line_options(monkeypatch: pytest.MonkeyPatch) -> None:
         screen=1,
         web_url="http://localhost:5173/",
     )
-    # Without URL, the public deployment of DataLab Web is played
-    assert _parse(monkeypatch, "--showcase-web").showcase_web == SHOWCASE_WEB_URL
+    # Without URL, the host page of the DataLab Web showcase is played
+    parsed = parse_arguments(["--showcase", "--showcase-web"])
+    assert parsed.request.web_url == DEFAULT_WEB_URL
 
 
-def test_showcase_command_line_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_showcase_command_line_defaults() -> None:
     """Without IDS, --showcase plays all the scenarios, once, at normal pace"""
-    env = _parse(monkeypatch, "--showcase")
-    assert env.showcase == "all"
-    assert not env.showcase_loop and not env.showcase_fullscreen
-    assert env.showcase_speed is None and env.showcase_screen is None
-    assert env.showcase_web is None
-    monkeypatch.setattr(player, "execenv", env)
-    assert ShowcaseOptions.from_execenv() == ShowcaseOptions()
-    assert _parse(monkeypatch).showcase is None
+    request = parse_arguments(["--showcase"]).request
+    assert request.scenarios == "all"
+    assert not request.loop and not request.fullscreen
+    assert request.speed is None and request.screen is None
+    assert request.web_url is None
+    assert ShowcaseOptions.from_request(request) == ShowcaseOptions()
+    assert parse_arguments([]).request is None
 
 
 def test_scenario_selection() -> None:

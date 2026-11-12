@@ -15,7 +15,7 @@ Advanced, interactive image analysis, as a user would do it:
 5. Line profile extraction, picked on the image
 
 At showcase speed, the parameter dialogs are driven as a user would do (see
-:mod:`datalab.gui.showcase.scenarios.d3_dialogs`). In check mode, the features are
+:mod:`datalab_showcase.showcase.scenarios.d3_dialogs`). In check mode, the features are
 run with explicit parameters, without any dialog.
 """
 
@@ -28,6 +28,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import sigima.objects
 import sigima.params
+from datalab.adapters_metadata import GeometryAdapter, TableAdapter
+from datalab.adapters_metadata.common import create_resultdata_dict
+from datalab.config import Conf
+from datalab.gui.processor.base import extract_processing_parameters
 from qtpy import QtWidgets as QW
 from sigima.enums import ContourShape
 from sigima.tests.data import (
@@ -37,12 +41,9 @@ from sigima.tests.data import (
     get_peak2d_data,
 )
 
-from datalab.adapters_metadata import GeometryAdapter, TableAdapter
-from datalab.adapters_metadata.common import create_resultdata_dict
-from datalab.config import Conf, _
-from datalab.gui.processor.base import extract_processing_parameters
-from datalab.gui.showcase.engine import ShowcaseScenario, plain_text
-from datalab.gui.showcase.scenarios.d3_dialogs import (
+from datalab_showcase.i18n import _, datalab_text
+from datalab_showcase.showcase.engine import ShowcaseScenario, plain_text
+from datalab_showcase.showcase.scenarios.d3_dialogs import (
     choose,
     click_button,
     click_plot,
@@ -59,11 +60,11 @@ from datalab.gui.showcase.scenarios.d3_dialogs import (
 )
 
 if TYPE_CHECKING:
+    from datalab.gui.panel.base import BaseDataPanel
+    from datalab.widgets.processingpreview import ProcessingPreviewDialog
     from sigima.objects import ImageObj, SignalObj
 
-    from datalab.gui.panel.base import BaseDataPanel
-    from datalab.gui.showcase.engine import ShowcaseContext
-    from datalab.widgets.processingpreview import ProcessingPreviewDialog
+    from datalab_showcase.showcase.engine import ShowcaseContext
 
 #: Seeds of the random data, for a reproducible showcase
 PEAKS_SEED, RING_SEED = 7, 1
@@ -205,7 +206,7 @@ def detect_peaks(ctx: ShowcaseContext) -> ImageObj:
     ctx.pause(1.0)
     ctx.checkpoint(len(panel.objmodel) == 1, "The image of the peaks was not added")
     ctx.say(_("A noisy image with bright spots: let us find them automatically"))
-    action = find_action(panel, _("2D peak detection"))
+    action = find_action(panel, datalab_text("2D peak detection"))
     if ctx.check:
         param = sigima.params.Peak2DDetectionParam.create(create_rois=True, size=50)
         panel.processor.compute_peak_detection(param)
@@ -269,11 +270,11 @@ def fit_contours(ctx: ShowcaseContext, image: ImageObj) -> None:
     )
     ctx.say(_("The results are gathered in tables, ready to be exported"), hold=0.5)
     with dialog_delay(3.0 * ctx.speed):
-        ctx.trigger_action(find_action(panel, _("Show results") + "..."))
+        ctx.trigger_action(find_action(panel, datalab_text("Show results") + "..."))
 
     # Results plot
     count = len(win.signalpanel.objmodel)
-    action = find_action(panel, _("Plot results") + "...")
+    action = find_action(panel, datalab_text("Plot results") + "...")
     if ctx.check:
         panel.plot_results("one_curve_per_object", "x", "y")
     else:
@@ -396,7 +397,7 @@ def measure_ring(ctx: ShowcaseContext, ring: ImageObj) -> None:
     sigpanel = win.signalpanel
     ctx.say(_("The radial profile of the ring is computed around its centroid"), 0.5)
     count = len(sigpanel.objmodel)
-    action = find_action(panel, _("Radial profile extraction..."))
+    action = find_action(panel, datalab_text("Radial profile extraction..."))
     if ctx.check:
         param = sigima.params.RadialProfileParam()
         param.update_from_obj(ring)
@@ -454,7 +455,7 @@ def extract_line_profile(ctx: ShowcaseContext, ring: ImageObj) -> None:
     ctx.pause(1.0)
     ctx.say(_("Finally, a line profile is picked right on the image"), hold=0.5)
     count = len(sigpanel.objmodel)
-    action = find_action(panel, _("Line profile..."))
+    action = find_action(panel, datalab_text("Line profile..."))
     if ctx.check:
         param = sigima.params.LineProfileParam.create(
             direction="horizontal", x=ring.xc, y=ring.yc

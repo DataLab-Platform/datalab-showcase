@@ -16,13 +16,17 @@ import time
 from collections.abc import Callable
 
 import pytest
-
-from datalab.config import Conf
-from datalab.gui.showcase import ShowcaseDialog, ShowcaseOptions, ShowcasePlayer
-from datalab.gui.showcase.engine import ScenarioSkipped, ShowcaseScenario
-from datalab.gui.showcase.player import build_playlist
-from datalab.gui.showcase.scenarios import get_native_scenarios, web_interlude
 from datalab.tests import datalab_test_app_context
+
+from datalab_showcase.showcase import ShowcaseDialog, ShowcaseOptions, ShowcasePlayer
+from datalab_showcase.showcase.engine import ScenarioSkipped, ShowcaseScenario
+from datalab_showcase.showcase.player import build_playlist
+from datalab_showcase.showcase.scenarios import get_native_scenarios, web_interlude
+from datalab_showcase.showcase.settings import (
+    ShowcaseSettings,
+    load_settings,
+    save_settings,
+)
 
 #: Fake browser: records its arguments, then exits after a while (with a duration
 #: "relaunch:<duration>", starts again in a new process, then exits at once)
@@ -42,17 +46,23 @@ time.sleep(float(duration))
 def test_web_url() -> None:
     """The URL plays one pass of the DataLab Web showcase, then closes the window"""
     build = web_interlude.build_web_url
+    assert web_interlude.DEFAULT_URL == "https://datalab-platform.com/web-showcase/"
     assert (
-        build("https://datalab-platform.com/web/", None, "fr", 1.5)
-        == "https://datalab-platform.com/web/?showcase=1&close=1&lang=fr&speed=1.5"
+        build(web_interlude.DEFAULT_URL, None, "fr", 1.5)
+        == "https://datalab-platform.com/web-showcase/?demos=all&close=1&lang=fr&speed=1.5"
     )
     # Parameters of the URL are kept, except those set by the interlude
     assert (
-        build("http://localhost:5173/?showcase=w1&loop=1&runtime=main", None, "en", 0)
-        == "http://localhost:5173/?runtime=main&showcase=w1&close=1&lang=en"
+        build("http://localhost:5173/?demos=w1&loop=1&runtime=main", None, "en", 0)
+        == "http://localhost:5173/?runtime=main&demos=w1&close=1&lang=en"
     )
-    assert build("http://localhost:5173?showcase=w1", ["w2", "w3"], "en", 1.0) == (
-        "http://localhost:5173?showcase=w2,w3&close=1&lang=en&speed=1"
+    assert build("http://localhost:5173?demos=w1", ["w2", "w3"], "en", 1.0) == (
+        "http://localhost:5173?demos=w2,w3&close=1&lang=en&speed=1"
+    )
+    # The parameters of the former DataLab Web showcase are removed
+    assert (
+        build("http://localhost:5173/?showcase=1", None, "en", 0)
+        == "http://localhost:5173/?demos=all&close=1&lang=en"
     )
     for url in ("localhost:5173", "datalab-platform.com/web", "ftp://host/web"):
         with pytest.raises(ScenarioSkipped):
@@ -233,7 +243,7 @@ def test_interlude_waits_for_the_browser(
     with open(record, encoding="utf-8") as fobj:
         arguments = json.load(fobj)
     lang = web_interlude.get_ui_language()
-    assert arguments[0] == f"--app=https://host/web/?showcase=w1&close=1&lang={lang}"
+    assert arguments[0] == f"--app=https://host/web/?demos=w1&close=1&lang={lang}"
     profile = web_interlude.get_profile_dir()
     assert f"--user-data-dir={profile}" in arguments
     # The profile does not offer to translate DataLab Web
@@ -311,11 +321,7 @@ def test_interlude_closes_the_browser(
 
 def test_dialog_includes_datalab_web() -> None:
     """The Showcase mode dialog includes DataLab Web on request, and remembers it"""
-    with (
-        Conf.showcase_web_enabled.context(False),
-        Conf.showcase_web_url.context(""),
-        datalab_test_app_context(console=False) as win,
-    ):
+    with datalab_test_app_context(console=False) as win:
         dialog = ShowcaseDialog(win, get_native_scenarios())
         assert not dialog.web_check.isChecked()
         assert not dialog.web_url_edit.isEnabled()
@@ -326,10 +332,23 @@ def test_dialog_includes_datalab_web() -> None:
         assert dialog.web_url_edit.isEnabled()
         dialog.accept()
         assert dialog.options.web_url == web_interlude.DEFAULT_URL
-        assert Conf.showcase_web_enabled.get() and Conf.showcase_web_url.get() == ""
+        settings = load_settings()
+        assert settings.web_enabled and settings.web_url == ""
         dialog = ShowcaseDialog(win, get_native_scenarios())
         assert dialog.web_check.isChecked()
         dialog.web_url_edit.setText(" http://localhost:5173/ ")
         dialog.accept()
         assert dialog.options.web_url == "http://localhost:5173/"
-        assert Conf.showcase_web_url.get() == "http://localhost:5173/"
+        assert load_settings().web_url == "http://localhost:5173/"
+
+
+def test_interlude_settings() -> None:
+    """The DataLab Web demos and the maximum duration of the interlude come from
+    the settings of the showcase, unless given"""
+    get_parameters = web_interlude.get_interlude_parameters
+    assert get_parameters() == (None, 15 * 60.0)
+    save_settings(ShowcaseSettings(web_ids="w2, w4", web_timeout=3))
+    assert get_parameters() == (["w2", "w4"], 180.0)
+    assert get_parameters(["w1"], 10.0) == (["w1"], 10.0)
+    save_settings(ShowcaseSettings(web_ids="all", web_timeout=0))
+    assert get_parameters() == (None, 60.0)

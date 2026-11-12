@@ -18,12 +18,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
-from datalab.gui.showcase import ShowcaseOptions, play_showcase
-from datalab.gui.showcase.engine import CaptionBanner, ShowcaseContext
-from datalab.gui.showcase.scenarios import d4_automation, d4_remote
 from datalab.tests import datalab_test_app_context
 from datalab.utils import macrorecovery
+
+from datalab_showcase.showcase import ShowcaseOptions, play_showcase
+from datalab_showcase.showcase.engine import CaptionBanner, ShowcaseContext
+from datalab_showcase.showcase.scenarios import d4_automation, d4_remote
 
 
 def _free_port() -> int:

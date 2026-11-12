@@ -4,20 +4,20 @@
 Native showcase scenarios
 =========================
 
-Each module of the :mod:`datalab.gui.showcase.scenarios` package defines a
-module-level ``SCENARIO`` (:class:`~datalab.gui.showcase.engine.ShowcaseScenario`)
+Each module of the :mod:`datalab_showcase.showcase.scenarios` package defines a
+module-level ``SCENARIO`` (:class:`~datalab_showcase.showcase.engine.ShowcaseScenario`)
 whose ``run`` callable plays the scenario with a
-:class:`~datalab.gui.showcase.engine.ShowcaseContext`.
+:class:`~datalab_showcase.showcase.engine.ShowcaseContext`.
 
-The DataLab Web interlude (:mod:`~datalab.gui.showcase.scenarios.web_interlude`)
+The DataLab Web interlude (:mod:`~datalab_showcase.showcase.scenarios.web_interlude`)
 is not a native scenario: the player adds it to the playlist when a DataLab Web
 URL is given.
 """
 
 from __future__ import annotations
 
-from datalab.gui.showcase.engine import ShowcaseScenario
-from datalab.gui.showcase.scenarios import (
+from datalab_showcase.showcase.engine import ShowcaseScenario
+from datalab_showcase.showcase.scenarios import (
     d1_provenance,
     d2_capsule,
     d3_image_analysis,

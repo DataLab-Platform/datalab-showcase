@@ -11,12 +11,12 @@ the workspace is reset, even when played in a loop.
 from __future__ import annotations
 
 import pytest
-
 from datalab.gui.main import DLMainWindow
-from datalab.gui.showcase import ShowcaseOptions, ShowcasePlayer, ShowcaseScenario
-from datalab.gui.showcase.engine import ShowcaseContext
-from datalab.gui.showcase.scenarios import d1_provenance
 from datalab.tests import datalab_test_app_context
+
+from datalab_showcase.showcase import ShowcaseOptions, ShowcasePlayer, ShowcaseScenario
+from datalab_showcase.showcase.engine import ShowcaseContext
+from datalab_showcase.showcase.scenarios import d1_provenance
 
 
 def get_history_state(win: DLMainWindow) -> tuple:

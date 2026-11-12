@@ -4,23 +4,24 @@
 Showcase mode dialog
 ====================
 
-The :mod:`datalab.gui.showcase.dialog` module implements the **Showcase mode**
-dialog (**?** menu): choice of the demos to play and of the playing options.
+The :mod:`datalab_showcase.showcase.dialog` module implements the **Showcase mode**
+dialog (**Plugins > DataLab Showcase** menu): choice of the demos to play and of
+the playing options.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from datalab.env import execenv
 from guidata.configtools import get_icon
 from guidata.qthelpers import exec_dialog
 from qtpy import QtCore as QC
 from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 
-from datalab.config import Conf, _
-from datalab.env import execenv
-from datalab.gui.showcase.player import (
+from datalab_showcase.i18n import _
+from datalab_showcase.showcase.player import (
     PACE_SPEEDS,
     ScenarioResult,
     ShowcaseOptions,
@@ -28,28 +29,39 @@ from datalab.gui.showcase.player import (
     is_showcase_playing,
     play_showcase,
 )
-from datalab.gui.showcase.scenarios import web_interlude
+from datalab_showcase.showcase.scenarios import web_interlude
+from datalab_showcase.showcase.settings import load_settings, save_settings
 
 if TYPE_CHECKING:
     from datalab.gui.main import DLMainWindow
-    from datalab.gui.showcase.engine import ShowcaseScenario
+
+    from datalab_showcase.showcase.engine import ShowcaseScenario
+
+#: Icon of the showcase mode (DataLab icon)
+ICON_NAME = "replay.svg"
 
 
 class ShowcaseDialog(QW.QDialog):
     """Showcase mode dialog: choice of the demos and of the playing options
 
-    The choices are remembered in the DataLab configuration.
+    The choices are remembered in the settings of the showcase (see
+    :mod:`datalab_showcase.showcase.settings`).
 
     Args:
         parent: Parent widget (DataLab main window)
         scenarios: Available scenarios
     """
 
+    #: Dialog opened by :func:`show_showcase_dialog`, if any
+    opened: ShowcaseDialog | None = None
+
     def __init__(self, parent: QW.QWidget, scenarios: list[ShowcaseScenario]) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Showcase mode"))
-        self.setWindowIcon(get_icon("replay.svg"))
+        self.setWindowIcon(get_icon(ICON_NAME))
         self.scenarios = scenarios
+        #: Settings of the showcase, updated once the dialog is accepted
+        self.settings = settings = load_settings()
         #: Options chosen by the user, once the dialog is accepted
         self.options: ShowcaseOptions | None = None
         layout = QW.QVBoxLayout(self)
@@ -70,7 +82,7 @@ class ShowcaseDialog(QW.QDialog):
         group = QW.QGroupBox(_("Demos"), self)
         group_layout = QW.QVBoxLayout(group)
         self.scenario_list = QW.QListWidget(group)
-        excluded = set(Conf.showcase_excluded_scenarios.get())
+        excluded = set(settings.excluded_scenarios)
         for scenario in scenarios:
             item = QW.QListWidgetItem(scenario.title, self.scenario_list)
             item.setData(QC.Qt.UserRole, scenario.id)
@@ -84,7 +96,7 @@ class ShowcaseDialog(QW.QDialog):
         form = QW.QFormLayout()
         layout.addLayout(form)
         self.loop_check = QW.QCheckBox(_("Play in a loop"), self)
-        self.loop_check.setChecked(Conf.showcase_loop.get())
+        self.loop_check.setChecked(settings.loop)
         form.addRow(self.loop_check)
         self.pace_combo = QW.QComboBox(self)
         for pace, label in (
@@ -93,11 +105,11 @@ class ShowcaseDialog(QW.QDialog):
             ("fast", _("Fast")),
         ):
             self.pace_combo.addItem(label, pace)
-        index = self.pace_combo.findData(Conf.showcase_pace.get())
+        index = self.pace_combo.findData(settings.pace)
         self.pace_combo.setCurrentIndex(index if index >= 0 else 1)
         form.addRow(_("Pace"), self.pace_combo)
         self.fullscreen_check = QW.QCheckBox(_("Full screen"), self)
-        self.fullscreen_check.setChecked(Conf.showcase_fullscreen.get())
+        self.fullscreen_check.setChecked(settings.fullscreen)
         form.addRow(self.fullscreen_check)
         self.web_check = QW.QCheckBox(_("Include DataLab Web"), self)
         self.web_check.setToolTip(
@@ -107,13 +119,12 @@ class ShowcaseDialog(QW.QDialog):
                 "or Chromium). The showcase resumes once the window is closed."
             )
         )
-        self.web_check.setChecked(Conf.showcase_web_enabled.get())
+        self.web_check.setChecked(settings.web_enabled)
         form.addRow(self.web_check)
-        self.web_url_edit = QW.QLineEdit(Conf.showcase_web_url.get(), self)
+        self.web_url_edit = QW.QLineEdit(settings.web_url, self)
         self.web_url_edit.setPlaceholderText(web_interlude.DEFAULT_URL)
         self.web_url_edit.setToolTip(
-            _("URL of DataLab Web (empty: public deployment, %s)")
-            % web_interlude.DEFAULT_URL
+            _("URL of the DataLab Web showcase (empty: %s)") % web_interlude.DEFAULT_URL
         )
         self.web_url_edit.setEnabled(self.web_check.isChecked())
         self.web_check.toggled.connect(self.web_url_edit.setEnabled)
@@ -126,7 +137,7 @@ class ShowcaseDialog(QW.QDialog):
             self.screen_combo.addItem(_("Current screen"), -1)
             for index, screen in enumerate(screens):
                 self.screen_combo.addItem(f"{index + 1}: {screen.name()}", index)
-            index = self.screen_combo.findData(Conf.showcase_screen.get())
+            index = self.screen_combo.findData(settings.screen)
             self.screen_combo.setCurrentIndex(max(index, 0))
             form.addRow(_("Screen"), self.screen_combo)
         self.button_box = QW.QDialogButtonBox(
@@ -172,22 +183,24 @@ class ShowcaseDialog(QW.QDialog):
         super().done(result)
 
     def __apply_choices(self) -> None:
-        """Remember the choices in the configuration and set :attr:`options`"""
+        """Remember the choices in the settings and set :attr:`options`"""
+        settings = self.settings
         selected = self.get_selected_ids()
         available = {scenario.id for scenario in self.scenarios}
-        previous = set(Conf.showcase_excluded_scenarios.get()) - available
+        previous = set(settings.excluded_scenarios) - available
         excluded = previous | (available - set(selected))
-        Conf.showcase_excluded_scenarios.set(sorted(excluded))
+        settings.excluded_scenarios = sorted(excluded)
         pace = self.pace_combo.currentData()
-        Conf.showcase_loop.set(self.loop_check.isChecked())
-        Conf.showcase_pace.set(pace)
-        Conf.showcase_fullscreen.set(self.fullscreen_check.isChecked())
+        settings.loop = self.loop_check.isChecked()
+        settings.pace = pace
+        settings.fullscreen = self.fullscreen_check.isChecked()
         screen = self.__get_screen()
         if self.screen_combo is not None:
-            Conf.showcase_screen.set(-1 if screen is None else screen)
+            settings.screen = -1 if screen is None else screen
         web_url = self.web_url_edit.text().strip()
-        Conf.showcase_web_enabled.set(self.web_check.isChecked())
-        Conf.showcase_web_url.set(web_url)
+        settings.web_enabled = self.web_check.isChecked()
+        settings.web_url = web_url
+        save_settings(settings)
         self.options = ShowcaseOptions(
             scenario_ids=selected,
             loop=self.loop_check.isChecked(),
@@ -211,11 +224,16 @@ def show_showcase_dialog(win: DLMainWindow) -> list[ScenarioResult] | None:
     Returns:
         Results of the scenarios played, or None if the showcase was cancelled
     """
-    if is_showcase_playing():
+    if is_showcase_playing() or ShowcaseDialog.opened is not None:
         return None
     scenarios = get_showcase_scenarios(win)
     dialog = ShowcaseDialog(win, scenarios)
-    if not exec_dialog(dialog) or dialog.options is None:
+    ShowcaseDialog.opened = dialog
+    try:
+        accepted = exec_dialog(dialog)
+    finally:
+        ShowcaseDialog.opened = None
+    if not accepted or dialog.options is None:
         return None
     if win.has_objects() and not execenv.unattended:
         answer = QW.QMessageBox.warning(
@@ -232,3 +250,11 @@ def show_showcase_dialog(win: DLMainWindow) -> list[ScenarioResult] | None:
         if answer != QW.QMessageBox.Ok:
             return None
     return play_showcase(win, dialog.options, scenarios)
+
+
+def close_showcase_dialog() -> None:
+    """Close the Showcase mode dialog, if it is opened (e.g. when the plugin is
+    unregistered)"""
+    dialog = ShowcaseDialog.opened
+    if dialog is not None:
+        dialog.reject()
