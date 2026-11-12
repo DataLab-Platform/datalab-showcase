@@ -1,0 +1,108 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (or vX.Y.Z-rcN for a release candidate) checks that it
+# matches the version of the project, runs the tests, builds the wheel and
+# publishes it in a GitHub release, with its SHA-256 checksum and its build
+# provenance attestation. The summary of the run gives the entry of the DataLab
+# plugin catalog.
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # publish the GitHub release
+      id-token: write  # attest the build provenance of the wheel
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Check the tag and the version
+        run: |
+          python - <<'EOF'
+          import os
+          import re
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-rc([1-9]\d*))?", tag)
+          if match is None:
+              raise SystemExit(f"Tag {tag} is not vX.Y.Z or vX.Y.Z-rcN")
+          version = match[1] + (f"rc{match[2]}" if match[2] else "")
+          with open("pyproject.toml", "rb") as file:
+              project_version = tomllib.load(file)["project"]["version"]
+          with open("src/datalab_showcase/__init__.py", encoding="utf-8") as file:
+              init = file.read()
+          package_version = re.search(r'^__version__ = "(.+)"', init, re.M)[1]
+          if project_version != version or package_version != version:
+              raise SystemExit(
+                  f"Tag {tag} requires version {version} in pyproject.toml "
+                  f"({project_version}) and in __init__.py ({package_version})"
+              )
+          print(f"Tag {tag} matches version {version}")
+          EOF
+
+      - name: Run the tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+          python -m pip install -e ".[test]" "datalab-platform[qt]" pytest-xvfb
+          python -m pytest
+
+      - name: Build the wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+          cd dist && sha256sum -- *.whl > SHA256SUMS
+
+      - name: Attest the build provenance of the wheel
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.whl
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          options=(--verify-tag --generate-notes)
+          if [[ "$GITHUB_REF_NAME" == *-rc* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/*.whl dist/SHA256SUMS \
+            "${options[@]}"
+
+      - name: Print the plugin catalog entry
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        run: |
+          sha256=$(sha256sum dist/*.whl | cut -d " " -f 1)
+          {
+            echo "To list this release in the DataLab plugin catalog, add"
+            echo "\`plugins/org.datalab.showcase.yaml\` to"
+            echo "https://github.com/DataLab-Platform/plugins"
+            echo "(or only the new release if the plugin is already listed):"
+            echo
+            echo '```yaml'
+            cat <<'EOF'
+          id: org.datalab.showcase
+          name: "DataLab Showcase"
+          EOF
+            echo "repository: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+            echo "capabilities: [visualization]"
+            echo "releases:"
+            echo "  - version: ${GITHUB_REF_NAME#v}"
+            echo "    sha256: $sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

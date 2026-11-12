@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools >= 77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datalab-showcase"
+version = "0.1.0"
+description = "Showcase mode: live and unattended demos of DataLab for exhibitions"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["datalab-platform >= 1.4, < 2"]
+keywords = ["datalab", "datalab-plugin"]
+
+[project.urls]
+Homepage = "https://github.com/DataLab-Platform/datalab-showcase"
+Issues = "https://github.com/DataLab-Platform/datalab-showcase/issues"
+
+[project.entry-points."datalab.plugins"]
+datalab_showcase = "datalab_showcase.adapters.desktop:DataLabShowcasePlugin"
+
+[project.optional-dependencies]
+test = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
