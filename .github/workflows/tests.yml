@@ -1,0 +1,164 @@
+name: Tests
+
+# - lint: Ruff, on each push and pull request.
+# - published: tests with the DataLab 1.4.x stack, on each push and pull request:
+#   Linux (Xvfb) and Windows with PyQt5, Linux with PyQt6. The other packages of
+#   the stack (Sigima, SigimaX, DataLab-Capsule, guidata, PlotPy) come from PyPI.
+# - development: tests with the development versions of the DataLab stack
+#   (develop branches of DataLab, Sigima, SigimaX, DataLab-Capsule, guidata and
+#   PlotPy), every week and on demand, to detect early the changes of DataLab
+#   breaking the plugin. Non-blocking.
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    # Only the "development" job runs on schedule
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Ruff
+        run: |
+          python -m pip install ruff
+          python -m ruff check --output-format=github .
+          python -m ruff format --check .
+
+  published:
+    name: DataLab 1.4.x (${{ matrix.os }}, ${{ matrix.qt }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            qt: pyqt5
+          - os: windows-latest
+            qt: pyqt5
+          - os: ubuntu-latest
+            qt: pyqt6
+    defaults:
+      run:
+        shell: bash
+    env:
+      QT_API: ${{ matrix.qt }}
+      # Branch of DataLab under test, until DataLab 1.4.1 is published on PyPI.
+      #
+      # The plugin requires datalab-platform >= 1.4.1, < 1.5, which pip cannot
+      # install from PyPI before the publication of DataLab 1.4.1. Rather than a
+      # job always failing (and ignored) until then, DataLab is installed from its
+      # "release" branch: the 1.4.x maintenance branch, i.e. the content of the
+      # next 1.4.x release, from which DataLab 1.4.1 is published. Its version is
+      # still 1.4.0 until then: the plugin is installed without its dependencies.
+      #
+      # Once DataLab 1.4.1 is published, set DATALAB_BRANCH to "": the published
+      # DataLab is then installed from PyPI, with the requirements of the plugin.
+      DATALAB_BRANCH: release
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-cursor0
+
+      - name: Install the plugin, DataLab 1.4.x and test tools
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.qt }}" = "pyqt6" ]; then qt=PyQt6; else qt=PyQt5; fi
+          if [ -n "$DATALAB_BRANCH" ]; then
+            python -m pip install "$qt" pytest-xvfb babel build pytest ruff \
+              "datalab-platform @ git+https://github.com/DataLab-Platform/DataLab.git@$DATALAB_BRANCH"
+            python -m pip install -e . --no-deps
+          else
+            python -m pip install -e ".[test]" datalab-platform "$qt" pytest-xvfb
+            python -m pip check
+          fi
+          python -c "import datalab; print('DataLab', datalab.__version__)"
+
+      - name: Compile the translations
+        run: python scripts/translations.py compile
+
+      - name: Test
+        run: python -m pytest -v
+
+  development:
+    name: Development DataLab (ubuntu-latest, pyqt5)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils libgl1 libegl1 libxkbcommon-x11-0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-cursor0
+
+      - name: Install the development DataLab stack
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install PyQt5 tomli
+          cd ..
+          git clone --depth 1 https://github.com/PlotPyStack/PythonQwt.git
+          git clone --depth 1 --branch develop https://github.com/PlotPyStack/guidata.git
+          git clone --depth 1 --branch develop https://github.com/PlotPyStack/plotpy.git
+          git clone --depth 1 --branch develop https://github.com/DataLab-Platform/sigima.git
+          git clone --depth 1 --branch develop https://github.com/DataLab-Platform/SigimaX.git
+          git clone --depth 1 --branch develop https://github.com/DataLab-Platform/DataLab-Capsule.git
+          git clone --depth 1 --branch develop https://github.com/DataLab-Platform/DataLab.git
+          python -m pip install -e guidata -e PythonQwt -e plotpy -e sigima
+          python -m pip install -e SigimaX --no-deps
+          python -m pip install -e DataLab-Capsule
+          # Dependencies of DataLab and SigimaX (installed with --no-deps), except
+          # the packages of the stack installed above
+          python -c "import tomli; deps=[d for p in ('DataLab/pyproject.toml', 'SigimaX/pyproject.toml') for d in tomli.load(open(p,'rb'))['project']['dependencies'] if not any(n in d for n in ['guidata','PlotPy','Sigima','SigimaX','datalab-capsule'])]; open('deps.txt','w').write('\n'.join(deps))"
+          python -m pip install -r deps.txt
+          python -m pip install -e DataLab --no-deps
+
+      - name: Install the plugin and test tools
+        run: |
+          # The version of DataLab develop may not satisfy the requirement of the
+          # plugin (e.g. 1.5.0.dev0): the plugin is installed without dependencies
+          python -m pip install -e . --no-deps
+          python -m pip install babel build pytest pytest-xvfb ruff
+
+      - name: Compile the translations (plugin and DataLab)
+        run: |
+          python scripts/translations.py compile
+          python -m guidata.utils.translations compile --name datalab --directory ../DataLab
+
+      - name: Test
+        run: python -m pytest -v

@@ -5,6 +5,9 @@ name: Release
 # publishes it in a GitHub release, with its SHA-256 checksum and its build
 # provenance attestation. The summary of the run gives the entry of the DataLab
 # plugin catalog.
+#
+# The translations are compiled before the tests and the build: the .mo files are
+# not tracked by git, but the wheel must contain them.
 
 on:
   push:
@@ -53,12 +56,17 @@ jobs:
           print(f"Tag {tag} matches version {version}")
           EOF
 
+      - name: Compile the translations
+        run: |
+          python -m pip install babel
+          python scripts/translations.py compile
+
       - name: Run the tests
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1 libegl1 libxkbcommon-x11-0 \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-cursor0
           python -m pip install -e ".[test]" "datalab-platform[qt]" pytest-xvfb
           python -m pytest
 
@@ -66,6 +74,16 @@ jobs:
         run: |
           python -m pip install build
           python -m build --wheel
+          python - <<'EOF'
+          import glob
+          import zipfile
+
+          (wheel,) = glob.glob("dist/*.whl")
+          catalog = "datalab_showcase/locale/fr/LC_MESSAGES/datalab_showcase.mo"
+          if catalog not in zipfile.ZipFile(wheel).namelist():
+              raise SystemExit(f"{wheel} does not contain {catalog}")
+          print(f"{wheel} contains {catalog}")
+          EOF
           cd dist && sha256sum -- *.whl > SHA256SUMS
 
       - name: Attest the build provenance of the wheel
@@ -100,7 +118,8 @@ jobs:
           name: "DataLab Showcase"
           EOF
             echo "repository: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-            echo "capabilities: [visualization]"
+            echo "icon: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/develop/src/datalab_showcase/icons/showcase.svg"
+            echo "keywords: [showcase, demo, kiosk, exhibition]"
             echo "releases:"
             echo "  - version: ${GITHUB_REF_NAME#v}"
             echo "    sha256: $sha256"
