@@ -358,7 +358,6 @@ class ClientConsole(QW.QFrame):
 
     def __init__(self, win: QW.QMainWindow, title: str) -> None:
         super().__init__(win)
-        self.win = win
         self.setObjectName("showcase_client_console")
         self.setAttribute(QC.Qt.WA_StyledBackground)
         self.setStyleSheet(
@@ -382,6 +381,16 @@ class ClientConsole(QW.QFrame):
         layout.addWidget(label)
         layout.addWidget(self.editor)
         win.installEventFilter(self)
+
+    @property
+    def win(self) -> QW.QMainWindow:
+        """Main window (parent of the console)
+
+        The window is not stored in an attribute: such a reference cycle (the
+        window owns the console, which would refer to the window) could make
+        Python delete the window while Qt deletes the console, its child.
+        """
+        return self.parentWidget()
 
     def eventFilter(  # pylint: disable=invalid-name
         self, obj: QC.QObject, event: QC.QEvent

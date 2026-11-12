@@ -111,6 +111,10 @@ def test_deferred_start_waits_until_datalab_is_ready() -> None:
             play=lambda _win, req: played.append(req),
             loop_running=lambda: loop_running[0],
         )
+        # No reference to the window, its parent: deleting the object (a child of
+        # the window) must never delete the window
+        assert deferred.win is win
+        assert all(value is not win for value in vars(deferred).values())
         deferred.timer.stop()  # Polled by the test
         assert execenv.do_not_quit
         deferred.poll()

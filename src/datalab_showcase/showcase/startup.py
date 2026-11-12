@@ -90,8 +90,9 @@ class DeferredStart(QC.QObject):
     """Start of the showcase requested on the command line, deferred until DataLab
     is ready (see :mod:`datalab_showcase.showcase.startup`)
 
-    The object is a child of the main window: it is deleted once the showcase is
-    started, or when the start is cancelled (:meth:`cancel`).
+    The object is a child of the main window, and keeps no Python reference to it
+    (see :attr:`win`): it is deleted once the showcase is started, or when the
+    start is cancelled (:meth:`cancel`).
 
     Args:
         win: DataLab main window
@@ -113,7 +114,6 @@ class DeferredStart(QC.QObject):
     ) -> None:
         super().__init__(win)
         self.setObjectName("datalab_showcase_deferred_start")
-        self.win = win
         self.request = request
         self.__play = play_request if play is None else play
         self.__loop_running = (
@@ -129,6 +129,16 @@ class DeferredStart(QC.QObject):
         self.timer.setInterval(self.POLL_INTERVAL_MS)
         self.timer.timeout.connect(self.poll)
         self.timer.start()
+
+    @property
+    def win(self) -> DLMainWindow:
+        """DataLab main window (parent of the object)
+
+        The window is not stored in an attribute: such a reference cycle (the
+        window owns the object, which would refer to the window) could make
+        Python delete the window while Qt deletes the object, its child.
+        """
+        return self.parent()
 
     def is_ready(self) -> bool:
         """Return True once DataLab is ready to play the showcase
