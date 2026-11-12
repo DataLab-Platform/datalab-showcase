@@ -10,24 +10,42 @@ readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["datalab-platform >= 1.4, < 2"]
-keywords = ["datalab", "datalab-plugin"]
+# The showcase drives the user interface of DataLab, including some of its
+# internal widgets: each minor version of DataLab needs a release of the plugin
+dependencies = ["datalab-platform >= 1.4.1, < 1.5"]
+keywords = ["datalab", "datalab-plugin", "showcase", "demo", "kiosk", "exhibition"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
 
 [project.urls]
 Homepage = "https://github.com/DataLab-Platform/datalab-showcase"
 Issues = "https://github.com/DataLab-Platform/datalab-showcase/issues"
 
 [project.entry-points."datalab.plugins"]
-datalab_showcase = "datalab_showcase.adapters.desktop:DataLabShowcasePlugin"
+datalab_showcase = "datalab_showcase.adapters.desktop:ShowcasePlugin"
+
+[project.gui-scripts]
+datalab-showcase = "datalab_showcase.app:run"
 
 [project.optional-dependencies]
-test = ["pytest", "ruff"]
+test = ["babel >= 2.12", "build >= 1.2", "pytest", "ruff"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The .mo files are compiled from the .po files before building the wheel (see
+# CONTRIBUTING.md): they are not tracked by git
+datalab_showcase = ["icons/*.svg", "locale/*/LC_MESSAGES/*.mo"]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 88
@@ -35,3 +53,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["datalab_showcase"]
