@@ -4,3 +4,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+# Compiled translations: built from the .po files before building the wheel
+*.mo
+*.pot
