@@ -55,4 +55,4 @@ The showcase uses some internal widgets of DataLab (e.g. the pages of the Applic
 
 ## Continuous integration
 
-The **Tests** workflow runs Ruff and the tests on each push and pull request, on Linux and Windows with PyQt5 and on Linux with PyQt6. Until DataLab 1.4.1 is published on PyPI, these tests install DataLab from its `release` branch (`DATALAB_BRANCH` variable of the workflow): once it is published, set `DATALAB_BRANCH` to `""` to test the published DataLab. The **development** job tests the `develop` branches of the DataLab stack every week (non-blocking).
+The **Tests** workflow runs Ruff and the tests on each push and pull request, on Linux and Windows with PyQt5 and on Linux with PyQt6, with the published DataLab. Before the publication of a DataLab version required by the plugin, set the `DATALAB_BRANCH` variable of the workflow to the DataLab branch to test (e.g. `release`), then back to `""` once it is published. The **development** job tests the `develop` branches of the DataLab stack every week (non-blocking).

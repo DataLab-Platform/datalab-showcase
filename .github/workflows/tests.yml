@@ -59,18 +59,11 @@ jobs:
         shell: bash
     env:
       QT_API: ${{ matrix.qt }}
-      # Branch of DataLab under test, until DataLab 1.4.1 is published on PyPI.
-      #
-      # The plugin requires datalab-platform >= 1.4.1, < 1.5, which pip cannot
-      # install from PyPI before the publication of DataLab 1.4.1. Rather than a
-      # job always failing (and ignored) until then, DataLab is installed from its
-      # "release" branch: the 1.4.x maintenance branch, i.e. the content of the
-      # next 1.4.x release, from which DataLab 1.4.1 is published. Its version is
-      # still 1.4.0 until then: the plugin is installed without its dependencies.
-      #
-      # Once DataLab 1.4.1 is published, set DATALAB_BRANCH to "": the published
-      # DataLab is then installed from PyPI, with the requirements of the plugin.
-      DATALAB_BRANCH: release
+      # Branch of DataLab under test, installed without the dependencies of the
+      # plugin, e.g. before the publication of a DataLab version it requires.
+      # Empty: the published DataLab is installed from PyPI, with the
+      # requirements of the plugin.
+      DATALAB_BRANCH: ""
     steps:
       - uses: actions/checkout@v7
 
