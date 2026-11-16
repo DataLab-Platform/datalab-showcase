@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-16
 
 First release of the plugin: the Showcase mode, formerly developed for DataLab 1.5 (DataLab-Platform/DataLab#529), moves out of DataLab into this plugin, installable in the standalone DataLab from the plugin catalog or from a file.
 
