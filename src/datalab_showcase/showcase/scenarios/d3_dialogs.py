@@ -34,6 +34,7 @@ from qtpy import QtGui as QG
 from qtpy import QtWidgets as QW
 
 from datalab_showcase.i18n import datalab_text
+from datalab_showcase.showcase.engine import ShowcaseInterrupted
 
 if TYPE_CHECKING:
     from datalab.gui.main import DLMainWindow
@@ -93,16 +94,19 @@ def drive_dialogs(
 
     Raises:
         RuntimeError: If a dialog is not shown, or if a driver fails
+        ShowcaseInterrupted: If the operator interrupted the scenario while a
+         dialog was driven
     """
     pending = list(drivers)
     driven: list[QW.QDialog] = []
     errors: list[Exception] = []
+    interruptions: list[ShowcaseInterrupted] = []
     busy = False
 
     def drive_next_dialog() -> None:
         """Drive the next modal dialog, once shown"""
         nonlocal busy
-        if busy or not pending:
+        if busy or not pending or interruptions:
             return
         dialog = QW.QApplication.activeModalWidget()
         if (
@@ -117,6 +121,13 @@ def drive_dialogs(
         try:
             with ctx.unguarded(dialog):
                 driver(dialog)
+        except ShowcaseInterrupted as exc:
+            # Never let the interruption escape from this slot of a Qt timer: it is
+            # raised again once the action has returned
+            interruptions.append(exc)
+            pending.clear()
+            if is_qobject_valid(dialog) and dialog.isVisible():
+                dialog.reject()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.exception("Showcase: cannot drive %s", type(dialog).__name__)
             errors.append(exc)
@@ -135,6 +146,8 @@ def drive_dialogs(
     finally:
         timer.stop()
         timer.deleteLater()
+    if interruptions:
+        raise interruptions[0]
     if errors:
         raise RuntimeError("A dialog could not be driven") from errors[0]
     if pending:

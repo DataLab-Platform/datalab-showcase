@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Finer operator controls during the showcase (closes [Issue #6](https://github.com/DataLab-Platform/datalab-showcase/issues/6)):
+  - **F9** still pauses at the next pause point of the demo; pressing it again pauses now, even during a computation, a dialog or a macro.
+  - **Shift+F12** (or **Esc** twice) still stops the showcase after the current demo; pressing it again stops it now.
+  - Step navigation: **→** (or **Page Down**) goes to the next step, **End** to the next demo, **Home** restarts the current demo.
+  - **+** and **−** change the pace while the showcase plays.
+  - A discreet control bar appears when the mouse moves and hides itself: pause, next step, next demo, restart, stop (and cancel a pending stop), pace, and progress of the showcase. It may be disabled in the dialog or with `--showcase-no-controls`.
+
 ## [0.1.0] - 2026-11-16
 
 First release of the plugin: the Showcase mode, formerly developed for DataLab 1.5 (DataLab-Platform/DataLab#529), moves out of DataLab into this plugin, installable in the standalone DataLab from the plugin catalog or from a file.

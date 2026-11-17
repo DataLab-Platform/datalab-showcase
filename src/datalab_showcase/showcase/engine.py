@@ -18,6 +18,14 @@ runs in two modes:
   the scenario still works (e.g. in the test suite, on the offscreen platform).
 
 Captions follow the language of the user interface: write them with ``_()``.
+
+The operator controls the showcase with hotkeys, or with the control bar shown when
+the mouse moves (see :class:`ControlBar`): two-level pause (requested, then
+immediate), step navigation (next step, next demo, restart), live pace and
+two-level stop (after the demo, then now). An interruption (next demo, restart or
+stop now) raises :class:`ShowcaseInterrupted` at the next *checkpoint* of the
+scenario (wait, caption, click...): the rest of the scenario, i.e. its cleanup
+(``finally`` blocks), is then played instantly.
 """
 
 from __future__ import annotations
@@ -31,10 +39,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import psutil
 import sigima.proc.signal as sips
 from datalab.env import execenv
 from datalab.gui.processor.base import WorkerState
 from datalab.gui.tour import Cover
+from guidata import qthelpers
 from guidata.configtools import get_icon
 from guidata.qthelpers import is_qobject_valid
 from qtpy import QtCore as QC
@@ -128,6 +138,43 @@ class ScenarioSkipped(Exception):
     The showcase skips the scenario, with a warning in the log (e.g. when a module
     or a plugin required by the scenario is not available).
     """
+
+
+#: Interruption: go to the next demo (End hotkey)
+NEXT_DEMO = "next"
+#: Interruption: restart the demo (Home hotkey)
+RESTART_DEMO = "restart"
+#: Interruption: stop the showcase now (Shift+F12 twice)
+STOP_NOW = "stop"
+
+
+class ShowcaseInterrupted(BaseException):
+    """Raised at the next checkpoint of a scenario interrupted by the operator
+
+    The operator interrupts a scenario to go to the next demo, to restart it, or to
+    stop the showcase now. The exception derives from :class:`BaseException`: the
+    ``except Exception`` blocks of the scenarios let it through, while their
+    ``finally`` blocks clean up, played instantly.
+
+    Args:
+        reason: :data:`NEXT_DEMO`, :data:`RESTART_DEMO` or :data:`STOP_NOW`
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def format_rate(factor: float) -> str:
+    """Return the playing rate of a delay factor, as shown to the operator
+
+    Args:
+        factor: Delay factor (e.g. 0.5)
+
+    Returns:
+        Rate (e.g. ``'×2'`` for a delay factor of 0.5)
+    """
+    return f"×{1.0 / factor:.2g}"
 
 
 @dataclass
@@ -497,12 +544,277 @@ class StatusBadge(_Overlay):
         painter.end()
 
 
+def _control_icon(kind: str) -> QG.QIcon:
+    """Return an icon of the control bar, drawn in white
+
+    Args:
+        kind: ``'play'``, ``'pause'``, ``'step'``, ``'next'``, ``'restart'`` or
+         ``'stop'``
+
+    Returns:
+        Icon
+    """
+    size = 64.0
+    pixmap = QG.QPixmap(int(size), int(size))
+    pixmap.fill(QC.Qt.transparent)
+    painter = QG.QPainter(pixmap)
+    painter.setRenderHint(QG.QPainter.Antialiasing)
+    painter.setPen(QC.Qt.NoPen)
+    painter.setBrush(QG.QColor(255, 255, 255))
+
+    def polygon(*points: tuple[float, float]) -> None:
+        painter.drawPolygon(
+            QG.QPolygonF([QC.QPointF(x * size, y * size) for x, y in points])
+        )
+
+    def rect(x: float, y: float, width: float, height: float) -> None:
+        painter.drawRect(QC.QRectF(x * size, y * size, width * size, height * size))
+
+    if kind == "play":
+        polygon((0.25, 0.15), (0.85, 0.5), (0.25, 0.85))
+    elif kind == "pause":
+        rect(0.22, 0.15, 0.2, 0.7)
+        rect(0.58, 0.15, 0.2, 0.7)
+    elif kind == "step":
+        polygon((0.18, 0.15), (0.66, 0.5), (0.18, 0.85))
+        rect(0.7, 0.15, 0.13, 0.7)
+    elif kind == "next":
+        polygon((0.06, 0.18), (0.42, 0.5), (0.06, 0.82))
+        polygon((0.42, 0.18), (0.78, 0.5), (0.42, 0.82))
+        rect(0.8, 0.18, 0.12, 0.64)
+    elif kind == "restart":
+        rect(0.14, 0.15, 0.13, 0.7)
+        polygon((0.84, 0.15), (0.32, 0.5), (0.84, 0.85))
+    else:
+        rect(0.2, 0.2, 0.6, 0.6)
+    painter.end()
+    return QG.QIcon(pixmap)
+
+
+def _format_duration(seconds: float) -> str:
+    """Return a duration as minutes and seconds (e.g. ``'1:05'``)"""
+    seconds = int(max(seconds, 0.0))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+class ControlBar(QW.QFrame):
+    """Control bar of the operator, at the bottom of the main window
+
+    The bar is shown when the operator moves the mouse, and hidden once the mouse
+    stays still for :attr:`HIDE_DELAY` (unless it hovers the bar): pause, next
+    step, next demo, restart, stop (and cancel stop), pace, and progress of the
+    playlist. It is a child widget of the main window: while a modal dialog is
+    open, the bar does not get the mouse clicks (the hotkeys still work).
+
+    Args:
+        ctx: Showcase context
+    """
+
+    #: Delay (s) after which the bar is hidden, once the mouse stays still
+    HIDE_DELAY = 3.0
+    #: Maximum number of demos shown as dots in the progress
+    MAX_DOTS = 20
+    STYLE = """
+    #showcaseControlBar {
+        background-color: rgba(16, 22, 34, 230);
+        border-radius: 14px;
+    }
+    #showcaseControlBar QToolButton {
+        color: white;
+        background: transparent;
+        border: none;
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-weight: bold;
+    }
+    #showcaseControlBar QToolButton:hover {
+        background-color: rgba(255, 255, 255, 50);
+    }
+    #showcaseControlBar QToolButton[active="true"] {
+        background-color: rgb(225, 135, 20);
+    }
+    #showcaseControlBar QLabel {
+        color: rgb(220, 225, 235);
+        padding: 0px 6px;
+    }
+    """
+
+    def __init__(self, ctx: ShowcaseContext) -> None:
+        super().__init__(ctx.win)
+        self.ctx = ctx
+        self.setObjectName("showcaseControlBar")
+        self.setFocusPolicy(QC.Qt.NoFocus)
+        self.setStyleSheet(self.STYLE)
+        layout = QW.QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(4)
+        self.restart_button = self.__add_button(
+            layout, _("Restart the demo (Home)"), ctx.restart_demo, "restart"
+        )
+        self.pause_button = self.__add_button(layout, "", ctx.toggle_pause, "pause")
+        self.step_button = self.__add_button(
+            layout, _("Next step (Right arrow)"), ctx.next_step, "step"
+        )
+        self.next_button = self.__add_button(
+            layout, _("Next demo (End)"), ctx.next_demo, "next"
+        )
+        layout.addSpacing(8)
+        self.stop_button = self.__add_button(layout, "", ctx.request_stop, "stop")
+        self.cancel_stop_button = self.__add_button(
+            layout, _("Cancel the stop"), ctx.cancel_stop
+        )
+        self.cancel_stop_button.setText(_("Cancel stop"))
+        layout.addSpacing(8)
+        self.slower_button = self.__add_button(
+            layout, _("Slower (-)"), lambda: ctx.change_pace(faster=False)
+        )
+        self.slower_button.setText("−")
+        self.pace_label = QW.QLabel(self)
+        self.pace_label.setToolTip(_("Pace"))
+        layout.addWidget(self.pace_label)
+        self.faster_button = self.__add_button(
+            layout, _("Faster (+)"), lambda: ctx.change_pace(faster=True)
+        )
+        self.faster_button.setText("+")
+        layout.addSpacing(8)
+        self.progress_label = QW.QLabel(self)
+        layout.addWidget(self.progress_label)
+        self.dots_label = QW.QLabel(self)
+        layout.addWidget(self.dots_label)
+        self.time_label = QW.QLabel(self)
+        self.time_label.setToolTip(_("Elapsed time in this demo"))
+        layout.addWidget(self.time_label)
+        ctx.win.installEventFilter(self)
+        self.refresh()
+
+    def __add_button(
+        self,
+        layout: QW.QHBoxLayout,
+        tooltip: str,
+        slot: Callable[[], None],
+        icon: str | None = None,
+    ) -> QW.QToolButton:
+        """Add a button to the bar"""
+        button = QW.QToolButton(self)
+        button.setFocusPolicy(QC.Qt.NoFocus)
+        button.setToolTip(tooltip)
+        button.setAutoRaise(True)
+        if icon is not None:
+            button.setIcon(_control_icon(icon))
+            button.setIconSize(QC.QSize(18, 18))
+        button.clicked.connect(lambda _checked=False: slot())
+        layout.addWidget(button)
+        return button
+
+    @staticmethod
+    def __set_active(button: QW.QToolButton, active: bool) -> None:
+        """Highlight a button (e.g. pause requested, stop pending)"""
+        if button.property("active") != active:
+            button.setProperty("active", active)
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def refresh(self) -> None:
+        """Update the buttons and the progress from the state of the showcase"""
+        ctx = self.ctx
+        if ctx.pause_effective:
+            self.pause_button.setIcon(_control_icon("play"))
+            self.pause_button.setToolTip(_("Resume (F9)"))
+        else:
+            self.pause_button.setIcon(_control_icon("pause"))
+            if ctx.paused:
+                self.pause_button.setToolTip(_("Pause now (F9)"))
+            else:
+                self.pause_button.setToolTip(
+                    _("Pause at the next pause point (F9), twice: pause now")
+                )
+        self.__set_active(self.pause_button, ctx.paused)
+        if ctx.stop_requested:
+            self.stop_button.setToolTip(_("Stop now (Shift+F12)"))
+            self.stop_button.setText(" " + _("Stop now"))
+            self.stop_button.setToolButtonStyle(QC.Qt.ToolButtonTextBesideIcon)
+        else:
+            self.stop_button.setToolTip(_("Stop after this demo (Shift+F12)"))
+            self.stop_button.setToolButtonStyle(QC.Qt.ToolButtonIconOnly)
+        self.__set_active(self.stop_button, ctx.stop_requested)
+        self.cancel_stop_button.setVisible(
+            ctx.stop_requested and ctx.interruption is None
+        )
+        self.pace_label.setText(format_rate(ctx.speed) if ctx.speed > 0 else "")
+        parts = []
+        if ctx.playlist_size:
+            parts.append(_("Demo %d/%d") % (ctx.playlist_position, ctx.playlist_size))
+        if ctx.scenario is not None:
+            parts.append(ctx.scenario.title)
+            if ctx.step:
+                parts.append(_("Step %d") % ctx.step)
+        self.progress_label.setText("  ·  ".join(parts))
+        size = ctx.playlist_size
+        if 1 < size <= self.MAX_DOTS:
+            dots = ["●" if i + 1 == ctx.playlist_position else "○" for i in range(size)]
+            self.dots_label.setText(" ".join(dots))
+            self.dots_label.show()
+        else:
+            self.dots_label.hide()
+        self.refresh_time()
+        if self.isVisible():
+            self.relayout()
+
+    def refresh_time(self) -> None:
+        """Update the elapsed time in the current demo"""
+        elapsed = self.ctx.scenario_elapsed
+        self.time_label.setVisible(elapsed is not None)
+        if elapsed is not None:
+            self.time_label.setText(_format_duration(elapsed))
+
+    def relayout(self) -> None:
+        """Place the bar at the bottom of the main window, centered"""
+        win = self.parentWidget()
+        hint = self.sizeHint()
+        width = min(hint.width(), win.width() - 16)
+        bottom = win.height() - 10
+        status_bar = win.statusBar()
+        if status_bar.isVisible():
+            bottom -= status_bar.height()
+        self.setGeometry(
+            (win.width() - width) // 2, bottom - hint.height(), width, hint.height()
+        )
+
+    def popup(self) -> None:
+        """Show the bar over the other widgets of the main window"""
+        self.refresh()
+        self.relayout()
+        self.show()
+        self.raise_()
+
+    def eventFilter(self, obj: QC.QObject, event: QC.QEvent) -> bool:
+        """Follow the size of the main window
+
+        Args:
+            obj: Watched object
+            event: Event
+
+        Returns:
+            False: events are never filtered out
+        """
+        if (
+            obj is self.parentWidget()
+            and event.type() == QC.QEvent.Resize
+            and self.isVisible()
+        ):
+            self.relayout()
+        return False
+
+
 class _Hotkeys(QC.QObject):
     """Application event filter handling the operator hotkeys of the showcase
 
-    - F9: pause or resume the showcase
+    - F9: request a pause (at the next pause point), again: pause now; once
+      paused: resume
     - Shift+F12, or Escape twice quickly: stop the showcase after the current
-      scenario
+      scenario, again: stop now
+    - Right arrow or Page Down: next step; End: next demo; Home: restart the demo
+    - Plus and minus: faster or slower pace
 
     Args:
         ctx: Showcase context
@@ -529,6 +841,25 @@ class _Hotkeys(QC.QObject):
         self.__last_press = press
         return True
 
+    def __get_handler(self, event: QG.QKeyEvent) -> Callable[[], None] | None:
+        """Return the handler of a hotkey (except Escape), or None"""
+        ctx, key, text = self.ctx, event.key(), event.text()
+        if key == QC.Qt.Key_F9:
+            return ctx.toggle_pause
+        if key == QC.Qt.Key_F12 and event.modifiers() & QC.Qt.ShiftModifier:
+            return ctx.request_stop
+        if key in (QC.Qt.Key_Right, QC.Qt.Key_PageDown):
+            return ctx.next_step
+        if key == QC.Qt.Key_End:
+            return ctx.next_demo
+        if key == QC.Qt.Key_Home:
+            return ctx.restart_demo
+        if key in (QC.Qt.Key_Plus, QC.Qt.Key_Equal) or text == "+":
+            return lambda: ctx.change_pace(faster=True)
+        if key == QC.Qt.Key_Minus or text == "-":
+            return lambda: ctx.change_pace(faster=False)
+        return None
+
     def eventFilter(self, obj: QC.QObject, event: QC.QEvent) -> bool:
         """Handle the operator hotkeys
 
@@ -545,16 +876,12 @@ class _Hotkeys(QC.QObject):
             or event.isAutoRepeat()
         ):
             return False
-        key = event.key()
-        if key == QC.Qt.Key_F9:
+        handler = self.__get_handler(event)
+        if handler is not None:
             if self.__is_new_press(event):
-                self.ctx.toggle_pause()
+                handler()
             return True
-        if key == QC.Qt.Key_F12 and event.modifiers() & QC.Qt.ShiftModifier:
-            if self.__is_new_press(event):
-                self.ctx.request_stop()
-            return True
-        if key == QC.Qt.Key_Escape and self.__is_new_press(event):
+        if event.key() == QC.Qt.Key_Escape and self.__is_new_press(event):
             now = time.monotonic()
             if now - self.__last_escape <= self.DOUBLE_ESCAPE_INTERVAL:
                 self.__last_escape = 0.0
@@ -581,6 +908,8 @@ class ShowcaseContext:
         win: DataLab main window
         speed: Delay factor: 1 for the normal pace, 1.5 for a slower pace, 0.7 for
          a faster pace, 0 for check mode
+        controls: True to show the control bar when the operator moves the mouse
+         (never in check mode)
 
     Raises:
         ValueError: If the speed is negative
@@ -595,29 +924,66 @@ class ShowcaseContext:
     GUARD_GRACE = 2.0
     #: Maximum waiting time (s) for the warm-up of the processing worker
     WARM_UP_TIMEOUT = 60.0
+    #: Delay factors of the live pace (plus and minus hotkeys), slowest first
+    PACE_FACTORS = (2.0, 1.5, 1.0, 0.7, 0.5)
+    #: Delay factor applied while fast-forwarding to the next step
+    FAST_FORWARD = 0.2
+    #: Duration (s) of the short messages of the badge (e.g. new pace)
+    MESSAGE_DURATION = 1.5
+    #: Interval (ms) after which the demo mode tries again to close a dialog, while
+    #: the showcase is paused
+    DEFERRED_CLOSE_MS = 200
 
-    def __init__(self, win: DLMainWindow, speed: float = 1.0) -> None:
+    def __init__(
+        self, win: DLMainWindow, speed: float = 1.0, controls: bool = True
+    ) -> None:
         if speed < 0:
             raise ValueError("Showcase speed must be positive or zero")
         self.win = win
         self.speed = float(speed)
+        self.controls = controls
         #: Scenario being played (see :meth:`begin_scenario`)
         self.scenario: ShowcaseScenario | None = None
         #: Number of captions shown since the beginning of the scenario
         self.step = 0
-        #: True while the operator pauses the showcase (F9)
+        #: Position (from 1) of the scenario in the playlist, and size of the
+        #: playlist (0: unknown), shown by the control bar
+        self.playlist_position = 0
+        self.playlist_size = 0
+        #: True while the operator pauses the showcase (F9): the pause is
+        #: requested, and takes effect at the next pause point (caption, pause...)
         self.paused = False
+        #: True once the operator asked for an immediate pause (F9 twice): the
+        #: pause takes effect at the next checkpoint (any wait, click...)
+        self.pause_now = False
         #: True once the operator asked to stop the showcase (Shift+F12)
         self.stop_requested = False
+        self.__parked = 0
+        self.__interruption: str | None = None
+        self.__unwinding = False
+        self.__shielded = 0
+        self.__fast_forward = False
+        self.__skip_hold = False
+        self.__pause_at_caption = False
+        self.__processes: list[Callable[[], int | None]] = []
+        self.__suspended: list[psutil.Process] = []
+        self.__message = ""
+        self.__message_end = 0.0
+        self.__scenario_start: float | None = None
         self.__caption: CaptionBanner | None = None
         self.__card: TitleCard | None = None
         self.__badge: StatusBadge | None = None
+        self.__bar: ControlBar | None = None
+        self.__cursor_pos: QC.QPoint | None = None
+        self.__bar_activity = 0.0
         self.__covers: list[tuple[Cover, list[QW.QWidget]]] = []
         self.__guard: QC.QTimer | None = None
+        self.__guard_tick: float | None = None
         self.__guarded: dict[int, tuple[QW.QWidget, float, float]] = {}
         self.__unguarded: list[QW.QWidget] = []
         self.__hotkeys: _Hotkeys | None = None
         self.__warm_up_worker: Worker | None = None
+        self.__close_dialog: Callable[..., None] | None = None
 
     # ------ Mode and life cycle ---------------------------------------------------
     @property
@@ -681,19 +1047,54 @@ class ShowcaseContext:
             self.__guard.timeout.connect(self.__check_modal_widgets)
             self.__guard.timeout.connect(self.__keep_overlays_on_top)
             self.__guard.timeout.connect(self.__place_caption)
+            self.__guard.timeout.connect(self.__follow_operator)
         self.__guarded = {}
+        self.__guard_tick = None
+        self.__cursor_pos = None
         self.__guard.start()
+        if self.__close_dialog is None:
+            self.__close_dialog = qthelpers.close_dialog_and_quit
+            qthelpers.close_dialog_and_quit = self.__close_dialog_unless_paused
 
     def stop(self) -> None:
         """Stop the modal-dialog guard and the hotkeys, and hide the overlays"""
-        self.finish_warm_up()
+        with self.__shield():
+            self.finish_warm_up()
         if self.__guard is not None:
             self.__guard.stop()
         self.__guarded = {}
         self.disable_hotkeys()
-        for overlay in (self.__caption, self.__card, self.__badge):
+        if self.__close_dialog is not None:
+            qthelpers.close_dialog_and_quit = self.__close_dialog
+            self.__close_dialog = None
+        self.__resume_processes()
+        for overlay in (self.__caption, self.__card, self.__badge, self.__bar):
             if overlay is not None:
                 overlay.hide()
+
+    def __close_dialog_unless_paused(
+        self, widget: QW.QWidget, screenshot: bool = False
+    ) -> None:
+        """Close a dialog shown by the demo mode of DataLab, unless paused
+
+        While the showcase is paused, the closing is deferred: the audience keeps
+        looking at the dialog.
+        """
+        if (
+            self.pause_effective
+            and is_qobject_valid(widget)
+            and widget.isVisible()
+            and self.__close_dialog is not None
+        ):
+            QC.QTimer.singleShot(
+                self.DEFERRED_CLOSE_MS,
+                lambda: self.__close_dialog_unless_paused(widget, screenshot),
+            )
+            return
+        close = self.__close_dialog
+        if close is None:
+            close = qthelpers.close_dialog_and_quit
+        close(widget, screenshot=screenshot)
 
     def __enter__(self) -> ShowcaseContext:
         self.start()
@@ -705,9 +1106,13 @@ class ShowcaseContext:
     def enable_hotkeys(self) -> None:
         """Enable the operator hotkeys
 
-        - **F9**: pause or resume the showcase
+        - **F9**: request a pause (at the next pause point), again: pause now;
+          once paused: resume
         - **Shift+F12**, or **Escape** twice quickly: stop the showcase after the
-          current scenario
+          current scenario, again: stop now
+        - **Right arrow** or **Page Down**: next step; **End**: next demo;
+          **Home**: restart the demo
+        - **+** and **-**: faster or slower pace
         """
         if self.__hotkeys is None:
             self.__hotkeys = _Hotkeys(self)
@@ -719,33 +1124,247 @@ class ShowcaseContext:
             QW.QApplication.instance().removeEventFilter(self.__hotkeys)
             self.__hotkeys = None
 
+    # ------ Operator controls ------------------------------------------------------
+    @property
+    def pause_effective(self) -> bool:
+        """True while the showcase is paused (not only requested)"""
+        return self.paused and (self.pause_now or self.__parked > 0)
+
+    @property
+    def interruption(self) -> str | None:
+        """Pending interruption of the scenario (:data:`NEXT_DEMO`,
+        :data:`RESTART_DEMO` or :data:`STOP_NOW`), or None"""
+        return self.__interruption
+
+    @property
+    def unwinding(self) -> bool:
+        """True while an interrupted scenario cleans up (played instantly)"""
+        return self.__unwinding
+
+    @property
+    def scenario_elapsed(self) -> float | None:
+        """Time (s) elapsed since the beginning of the scenario, or None"""
+        if self.__scenario_start is None:
+            return None
+        return time.monotonic() - self.__scenario_start
+
     def toggle_pause(self) -> None:
         """Pause or resume the showcase (F9 hotkey)
 
-        The pause takes effect at the next step of the scenario (caption, pause...).
+        The first press requests the pause: it takes effect at the next pause point
+        of the scenario (caption, pause...). The second press pauses now, at the
+        next checkpoint (any wait, click...), and suspends the processes of the
+        scenario (e.g. a macro). Once paused, a press resumes the showcase.
         """
-        self.paused = not self.paused and not self.stop_requested
-        logger.info(
-            "Showcase %s by the operator", "paused" if self.paused else "resumed"
-        )
-        self.__update_badge()
+        if not self.paused:
+            if self.stop_requested:
+                return
+            self.paused = True
+            self.pause_now = False
+            logger.info("Showcase pause requested by the operator")
+        elif not self.pause_effective:
+            self.pause_now = True
+            self.__suspend_processes()
+            logger.info("Showcase paused now by the operator")
+        else:
+            self.__release_pause()
+            logger.info("Showcase resumed by the operator")
+        self.__update_controls()
+
+    def __release_pause(self) -> None:
+        """Release the pause, requested or effective"""
+        self.paused = False
+        self.pause_now = False
+        self.__pause_at_caption = False
+        self.__resume_processes()
 
     def request_stop(self) -> None:
-        """Stop the showcase after the current scenario (Shift+F12 hotkey)"""
+        """Stop the showcase (Shift+F12 hotkey)
+
+        The first press stops the showcase after the current scenario. The second
+        press stops it now: the scenario is interrupted (see
+        :class:`ShowcaseInterrupted`).
+        """
         if not self.stop_requested:
             self.stop_requested = True
-            self.paused = False
+            self.__release_pause()
             logger.info("Showcase stop requested by the operator")
-            self.__update_badge()
+        elif self.scenario is not None:
+            self.__interrupt(STOP_NOW)
+        else:
+            self.__skip_hold = True
+        self.__update_controls()
 
-    def __update_badge(self) -> None:
-        """Show the state of the showcase (paused or stopping) to the operator"""
+    def cancel_stop(self) -> None:
+        """Cancel the stop of the showcase after the current scenario"""
+        if self.stop_requested and self.__interruption != STOP_NOW:
+            self.stop_requested = False
+            logger.info("Showcase stop cancelled by the operator")
+            self.__update_controls()
+
+    def next_step(self) -> None:
+        """Go to the next step of the scenario (Right arrow or Page Down hotkey)
+
+        The current wait is skipped, and the scenario is fast-forwarded to its next
+        caption. While paused, the showcase pauses again at the next caption.
+        """
+        if self.scenario is not None and not self.__unwinding:
+            if self.paused:
+                self.__release_pause()
+                self.__pause_at_caption = True
+            self.__fast_forward = True
+        self.__skip_hold = True
+        self.__update_controls()
+
+    def next_demo(self) -> None:
+        """Interrupt the scenario, and go to the next demo (End hotkey)"""
+        self.__interrupt(NEXT_DEMO)
+        self.__update_controls()
+
+    def restart_demo(self) -> None:
+        """Interrupt the scenario, and play it again (Home hotkey)"""
+        self.__interrupt(RESTART_DEMO)
+        self.__update_controls()
+
+    def __interrupt(self, reason: str) -> None:
+        """Interrupt the scenario at its next checkpoint (outside a scenario, the
+        current wait is skipped)"""
+        self.__release_pause()
+        self.__fast_forward = False
+        self.__skip_hold = True
+        if self.scenario is None or self.__unwinding:
+            return
+        if self.__interruption != STOP_NOW:
+            self.__interruption = reason
+        logger.info("Showcase interrupted by the operator: %s", self.__interruption)
+
+    def change_pace(self, faster: bool) -> None:
+        """Change the pace of the showcase (plus and minus hotkeys)
+
+        The pace moves to the next step of :attr:`PACE_FACTORS`. Nothing is done in
+        check mode.
+
+        Args:
+            faster: True for a faster pace, False for a slower one
+        """
         if self.check:
             return
-        if self.stop_requested:
-            text = _("Stopping after this demo")
-        elif self.paused:
+        factors = self.PACE_FACTORS
+        current = min(range(len(factors)), key=lambda i: abs(factors[i] - self.speed))
+        if faster:
+            index = min(current + 1, len(factors) - 1)
+        else:
+            index = max(current - 1, 0)
+        self.speed = factors[index]
+        logger.info("Showcase pace changed by the operator: %.2f", self.speed)
+        self.__show_message(_("Pace %s") % format_rate(self.speed))
+
+    def show_controls(self) -> None:
+        """Show the control bar (hidden after :attr:`ControlBar.HIDE_DELAY`)
+
+        Nothing is done in check mode, or if the control bar is disabled.
+        """
+        if self.check or not self.controls:
+            return
+        if self.__bar is None:
+            self.__bar = ControlBar(self)
+        self.__bar_activity = time.monotonic()
+        self.__bar.popup()
+
+    @property
+    def control_bar(self) -> ControlBar | None:
+        """Control bar, once shown"""
+        return self.__bar
+
+    @contextmanager
+    def pausable_process(
+        self, pid_getter: Callable[[], int | None]
+    ) -> Generator[None, None, None]:
+        """Suspend a process of the scenario while the showcase is paused
+
+        Args:
+            pid_getter: Callable returning the process identifier (or None while
+             the process is not running)
+
+        Yields:
+            None
+        """
+        self.__processes.append(pid_getter)
+        try:
+            if self.pause_effective:
+                self.__suspend_processes()
+            yield
+        finally:
+            self.__processes.remove(pid_getter)
+            pid = self.__get_pid(pid_getter)
+            for process in [p for p in self.__suspended if p.pid == pid]:
+                self.__suspended.remove(process)
+                self.__resume_process(process)
+
+    @staticmethod
+    def __get_pid(pid_getter: Callable[[], int | None]) -> int | None:
+        """Return the identifier of a process, or None"""
+        try:
+            return pid_getter()
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+
+    def __suspend_processes(self) -> None:
+        """Suspend the processes of the scenario (immediate pause)"""
+        suspended = {process.pid for process in self.__suspended}
+        for pid_getter in self.__processes:
+            pid = self.__get_pid(pid_getter)
+            if not pid or pid in suspended:
+                continue
+            try:
+                process = psutil.Process(pid)
+                process.suspend()
+            except (psutil.Error, OSError):
+                logger.debug("Showcase: cannot suspend process %s", pid)
+                continue
+            self.__suspended.append(process)
+            suspended.add(pid)
+
+    def __resume_processes(self) -> None:
+        """Resume the processes suspended by the pause"""
+        suspended, self.__suspended = self.__suspended, []
+        for process in suspended:
+            self.__resume_process(process)
+
+    @staticmethod
+    def __resume_process(process: psutil.Process) -> None:
+        """Resume a process suspended by the pause"""
+        try:
+            process.resume()
+        except (psutil.Error, OSError):
+            logger.debug("Showcase: cannot resume process %s", process.pid)
+
+    def __show_message(self, text: str) -> None:
+        """Show a short message to the operator (e.g. new pace)"""
+        self.__message = text
+        self.__message_end = time.monotonic() + self.MESSAGE_DURATION
+        self.__update_controls()
+
+    def __update_controls(self) -> None:
+        """Show the state of the showcase to the operator (badge and control bar)"""
+        self.__update_badge()
+        if self.__bar is not None and self.__bar.isVisible():
+            self.__bar.refresh()
+
+    def __update_badge(self) -> None:
+        """Show the state of the showcase (paused, stopping...) to the operator"""
+        if self.check:
+            return
+        if self.__interruption == STOP_NOW:
+            text = _("Stopping...")
+        elif self.stop_requested:
+            text = _("Stopping after this demo — Shift+F12 again: stop now")
+        elif self.pause_effective:
             text = _("Paused (F9 to resume)")
+        elif self.paused:
+            text = _("Pause requested — F9 again: pause now")
+        elif self.__message:
+            text = self.__message
         else:
             if self.__badge is not None:
                 self.__badge.hide()
@@ -755,6 +1374,35 @@ class ShowcaseContext:
         self.__badge.set_text(text)
         self.__badge.popup()
 
+    def __follow_operator(self) -> None:
+        """Show the control bar when the operator moves the mouse, hide it once
+        the mouse stays still, and expire the short messages (guard timer)"""
+        now = time.monotonic()
+        if self.__message and now >= self.__message_end:
+            self.__message = ""
+            self.__update_badge()
+        if self.check or not self.controls:
+            return
+        pos = QG.QCursor.pos()
+        if self.__cursor_pos is None:
+            self.__cursor_pos = pos
+            return
+        bar = self.__bar
+        if (pos - self.__cursor_pos).manhattanLength() > 2:
+            self.__cursor_pos = pos
+            if bar is None or not bar.isVisible():
+                self.show_controls()
+            else:
+                self.__bar_activity = now
+        elif bar is not None and bar.isVisible():
+            if bar.rect().contains(bar.mapFromGlobal(pos)):
+                self.__bar_activity = now
+            elif now - self.__bar_activity >= ControlBar.HIDE_DELAY:
+                bar.hide()
+        if bar is not None and bar.isVisible():
+            bar.refresh_time()
+            bar.raise_()
+
     def begin_scenario(self, scenario: ShowcaseScenario) -> None:
         """Begin a scenario (the scenario title is shown above the captions)
 
@@ -763,12 +1411,32 @@ class ShowcaseContext:
         """
         self.scenario = scenario
         self.step = 0
+        self.__interruption = None
+        self.__unwinding = False
+        self.__fast_forward = False
+        self.__skip_hold = False
+        self.__scenario_start = time.monotonic()
+        self.__update_controls()
 
-    def end_scenario(self) -> None:
-        """End the current scenario"""
+    def end_scenario(self) -> str | None:
+        """End the current scenario
+
+        Returns:
+            Interruption of the scenario by the operator (:data:`NEXT_DEMO`,
+             :data:`RESTART_DEMO` or :data:`STOP_NOW`), or None
+        """
+        reason = self.__interruption
         self.hide_caption()
         self.scenario = None
         self.step = 0
+        self.__interruption = None
+        self.__unwinding = False
+        self.__fast_forward = False
+        self.__skip_hold = False
+        self.__pause_at_caption = False
+        self.__scenario_start = None
+        self.__update_controls()
+        return reason
 
     # ------ Processing worker warm-up ----------------------------------------------
     def start_warm_up(self) -> None:
@@ -805,7 +1473,11 @@ class ShowcaseContext:
             return
         self.__warm_up_worker = None
         start = time.monotonic()
-        if self.wait_until(worker.is_computation_finished, self.WARM_UP_TIMEOUT):
+        with self.__shield():
+            ready = self.wait_until(
+                worker.is_computation_finished, self.WARM_UP_TIMEOUT
+            )
+        if ready:
             if worker.has_result_available():
                 worker.get_result()
             logger.info(
@@ -817,27 +1489,122 @@ class ShowcaseContext:
             worker.restart()
 
     # ------ Timing -----------------------------------------------------------------
+    @contextmanager
+    def __shield(self) -> Generator[None, None, None]:
+        """Neither pause nor interrupt the scenario within the context"""
+        self.__shielded += 1
+        try:
+            yield
+        finally:
+            self.__shielded -= 1
+
+    def __poll(self) -> None:
+        """Checkpoint of the scenario: pause now (F9 twice) or interrupt it
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
+        """
+        if self.__shielded or self.__unwinding:
+            return
+        if self.__interruption is None and self.paused and self.pause_now:
+            self.__park()
+        if self.__interruption is not None and self.scenario is not None:
+            self.__unwinding = True
+            self.__fast_forward = False
+            self.__update_controls()
+            raise ShowcaseInterrupted(self.__interruption)
+
+    def __park(self) -> None:
+        """Wait while the showcase is paused, with the processes of the scenario
+        suspended"""
+        self.__parked += 1
+        self.__update_controls()
+        try:
+            while (
+                self.paused and not self.stop_requested and self.__interruption is None
+            ):
+                self.__suspend_processes()
+                process_events()
+                time.sleep(0.02)
+        finally:
+            self.__parked -= 1
+            if not self.__parked:
+                self.__resume_processes()
+            self.__update_controls()
+
+    def __hold(self, units: float) -> None:
+        """Process events during a duration at normal pace, scaled by the live
+        pace, frozen while paused
+
+        The hold is skipped by the next step (or an interruption), and accelerated
+        while fast-forwarding to the next step.
+
+        Args:
+            units: Duration (s) at normal pace
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
+        """
+        remaining = units
+        last = time.monotonic()
+        while True:
+            process_events()
+            if self.__unwinding:
+                return
+            self.__poll()
+            if self.__skip_hold:
+                self.__skip_hold = False
+                return
+            if self.paused and not (self.__shielded or self.stop_requested):
+                self.__park()
+                last = time.monotonic()
+                continue
+            factor = self.speed * (self.FAST_FORWARD if self.__fast_forward else 1.0)
+            if factor <= 0:
+                return
+            now = time.monotonic()
+            remaining -= (now - last) / factor
+            last = now
+            if remaining <= 0:
+                return
+            time.sleep(min(0.01, remaining * factor))
+
     def pause(self, seconds: float = 1.0) -> None:
         """Pause the scenario while processing the events of the user interface
+
+        This is a pause point: a pause requested by the operator takes effect here.
 
         Args:
             seconds: Duration at normal pace, scaled by the showcase speed (in check
              mode, pending events are processed once)
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
         """
         if self.speed > 0:
-            self.__wait(seconds * self.speed)
+            self.__hold(seconds)
         else:
             process_events()
+            self.__poll()
         self.wait_while_paused()
 
     def wait_while_paused(self) -> None:
-        """Wait while the operator pauses the showcase (F9)"""
-        while self.paused and not self.stop_requested:
-            process_events()
-            time.sleep(0.02)
+        """Wait while the operator pauses the showcase (F9)
+
+        This is a pause point: a pause requested by the operator takes effect here.
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
+        """
+        if self.paused and not (self.__unwinding or self.__shielded):
+            self.__park()
+        self.__poll()
 
     def wait_until(self, condition: Callable[[], bool], timeout: float = 10.0) -> bool:
         """Process events until a condition is met, whatever the speed
+
+        This is a checkpoint: the scenario is paused now (F9 twice) or interrupted
+        here. The timeout does not run while the showcase is paused.
 
         Args:
             condition: Callable returning True when the condition is met
@@ -845,28 +1612,20 @@ class ShowcaseContext:
 
         Returns:
             True if the condition is met, False after the timeout
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
         """
         end = time.monotonic() + timeout
         while not condition():
             if time.monotonic() >= end:
                 return False
             process_events()
+            start = time.monotonic()
+            self.__poll()
+            end += time.monotonic() - start
             time.sleep(0.01)
         return True
-
-    def __wait(self, duration: float) -> None:
-        """Process events during a duration (s), frozen while paused"""
-        end = time.monotonic() + duration
-        while True:
-            process_events()
-            if self.paused:
-                remaining = end - time.monotonic()
-                self.wait_while_paused()
-                end = time.monotonic() + max(remaining, 0.0)
-            now = time.monotonic()
-            if now >= end:
-                return
-            time.sleep(min(0.01, end - now))
 
     # ------ Captions and cards -------------------------------------------------------
     def say(self, text: str, hold: float = 2.5) -> None:
@@ -883,7 +1642,18 @@ class ShowcaseContext:
         Args:
             text: Caption text (translated with ``_()``)
             hold: Pause duration (s) at normal pace
+
+        Raises:
+            ShowcaseInterrupted: If the operator interrupted the scenario
         """
+        if self.__unwinding:
+            return
+        self.__poll()
+        self.__fast_forward = False
+        self.__skip_hold = False
+        if self.__pause_at_caption:
+            self.__pause_at_caption = False
+            self.paused = not self.stop_requested
         self.step += 1
         logger.info("Showcase caption %d: %s", self.step, text)
         if not self.check:
@@ -896,6 +1666,7 @@ class ShowcaseContext:
                 cover, targets = self.__covers[-1]
                 cover.exclude(targets + [self.__caption])
                 cover.update_geometry()
+        self.__update_controls()
         self.pause(hold)
 
     def hide_caption(self) -> None:
@@ -1059,6 +1830,8 @@ class ShowcaseContext:
         The card stays shown until the processing worker is warmed up (see
         :meth:`start_warm_up`).
         """
+        if self.__unwinding:
+            return
         if self.check:
             self.pause(0.0)
             return
@@ -1164,6 +1937,7 @@ class ShowcaseContext:
         """
         if (
             self.check
+            or self.__unwinding
             or is_headless()
             or widget is None
             or not is_qobject_valid(widget)
@@ -1172,8 +1946,7 @@ class ShowcaseContext:
             return
         target = widget.mapToGlobal(widget.rect().center() if pos is None else pos)
         start = QG.QCursor.pos()
-        duration *= self.speed
-        steps = max(1, int(duration * 60))
+        steps = max(1, int(duration * self.speed * 60))
         for index in range(1, steps + 1):
             ratio = index / steps
             eased = ratio * ratio * (3.0 - 2.0 * ratio)
@@ -1181,7 +1954,10 @@ class ShowcaseContext:
                 round(start.x() + (target.x() - start.x()) * eased),
                 round(start.y() + (target.y() - start.y()) * eased),
             )
-            self.__wait(duration / steps)
+            self.__cursor_pos = QG.QCursor.pos()
+            self.__hold(duration / steps)
+            if self.__unwinding:
+                return
 
     @staticmethod
     def __send_mouse_event(
@@ -1211,18 +1987,19 @@ class ShowcaseContext:
         """
         if not widget.isEnabled():
             raise RuntimeError(f"Cannot click on a disabled {type(widget).__name__}")
+        self.__poll()
         self.move_cursor_to(widget, pos)
         if isinstance(widget, QW.QAbstractButton) and pos is None:
             if not self.check:
                 widget.setDown(True)
-                self.__wait(0.15 * self.speed)
+                self.__hold(0.15)
                 widget.setDown(False)
             widget.click()
         else:
             local = widget.rect().center() if pos is None else pos
             self.__send_mouse_event(widget, QC.QEvent.MouseButtonPress, local)
             if not self.check:
-                self.__wait(0.15 * self.speed)
+                self.__hold(0.15)
             self.__send_mouse_event(widget, QC.QEvent.MouseButtonRelease, local)
         QW.QApplication.processEvents()
 
@@ -1249,15 +2026,17 @@ class ShowcaseContext:
             raise TypeError(f"Cannot type text in a {type(widget).__name__}")
         self.move_cursor_to(widget)
         widget.setFocus()
-        if self.check or cps <= 0:
+        if self.check or cps <= 0 or self.__unwinding:
             insert(text)
         else:
-            delay = self.speed / cps
-            for char in text:
+            for index, char in enumerate(text):
                 insert(char)
                 if not isinstance(widget, QW.QLineEdit):
                     widget.ensureCursorVisible()
-                self.__wait(delay)
+                self.__hold(1.0 / cps)
+                if self.__unwinding:
+                    insert(text[index + 1 :])
+                    break
         QW.QApplication.processEvents()
 
     # ------ Menus, actions and processing features ----------------------------------
@@ -1417,8 +2196,9 @@ class ShowcaseContext:
         Args:
             action: Action to show
         """
-        if self.check:
+        if self.check or self.__unwinding:
             return
+        self.__poll()
         path = self.find_menu_path(action)
         if path is not None:
             self.__walk_menus(path)
@@ -1441,8 +2221,9 @@ class ShowcaseContext:
         Raises:
             RuntimeError: If the action is disabled
         """
+        self.__poll()
         path = self.find_menu_path(action)
-        if not self.check:
+        if not (self.check or self.__unwinding):
             if path is not None:
                 self.__walk_menus(path)
             else:
@@ -1487,6 +2268,7 @@ class ShowcaseContext:
             Current object of the panel after the processing (i.e. the new object
              for processing features)
         """
+        self.__poll()
         data_panel = self.__get_panel(panel)
         if data_panel is not self.current_panel():
             self.win.set_current_panel(data_panel)
@@ -1500,7 +2282,7 @@ class ShowcaseContext:
         else:
             if action is not None:
                 path = self.find_menu_path(action)
-                if path is not None and not self.check:
+                if path is not None and not (self.check or self.__unwinding):
                     self.__walk_menus(path)
                 QW.QApplication.processEvents()
                 if not action.isEnabled():
@@ -1535,7 +2317,9 @@ class ShowcaseContext:
 
         Raises:
             AssertionError: If the condition is not met
+            ShowcaseInterrupted: If the operator interrupted the scenario
         """
+        self.__poll()
         if not condition:
             raise AssertionError(message)
         logger.debug("Showcase checkpoint passed: %s", message)
@@ -1578,10 +2362,30 @@ class ShowcaseContext:
                 children = self.win.children()
 
     def __check_modal_widgets(self) -> None:
-        """Accept the modal dialogs and message boxes left open (guard timer)"""
+        """Accept the modal dialogs and message boxes left open (guard timer)
+
+        The delays of the guard do not run while the showcase is paused. While a
+        scenario is interrupted, the modal dialog is rejected (e.g. a parameter
+        dialog of DataLab, or a progress dialog), unless the scenario drives it.
+        """
         now = time.monotonic()
-        candidates: list[QW.QWidget] = []
+        tick = 0.0 if self.__guard_tick is None else now - self.__guard_tick
+        self.__guard_tick = now
+        frozen = self.pause_effective
         modal = QW.QApplication.activeModalWidget()
+        if (
+            self.__interruption is not None
+            and isinstance(modal, QW.QDialog)
+            and not any(modal is unguarded for unguarded in self.__unguarded)
+        ):
+            logger.info(
+                "Showcase: rejecting %s %r (interrupted scenario)",
+                type(modal).__name__,
+                modal.windowTitle(),
+            )
+            modal.reject()
+            return
+        candidates: list[QW.QWidget] = []
         if modal is not None:
             candidates.append(modal)
         for widget in QW.QApplication.topLevelWidgets():
@@ -1600,6 +2404,8 @@ class ShowcaseContext:
             entry = self.__guarded.get(id(widget))
             if entry is None or entry[0] is not widget:
                 entry = (widget, now, self.guard_timeout(widget))
+            elif frozen:
+                entry = (widget, entry[1] + tick, entry[2])
             since, timeout = entry[1], entry[2]
             if now - since >= timeout:
                 self.__accept_widget(widget, timeout)

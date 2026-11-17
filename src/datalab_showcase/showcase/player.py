@@ -25,8 +25,10 @@ from qtpy import QtWidgets as QW
 
 from datalab_showcase.showcase import applications
 from datalab_showcase.showcase.engine import (
+    RESTART_DEMO,
     ScenarioSkipped,
     ShowcaseContext,
+    ShowcaseInterrupted,
     ShowcaseScenario,
     is_headless,
 )
@@ -76,6 +78,8 @@ class ShowcaseOptions:
         web_url: URL of DataLab Web, to end each loop with the DataLab Web
          interlude (None: no interlude, unless its ID is in ``scenario_ids``), see
          :mod:`datalab_showcase.showcase.scenarios.web_interlude`
+        controls: True to show the control bar of the operator when the mouse
+         moves
     """
 
     scenario_ids: list[str] | None = None
@@ -84,6 +88,7 @@ class ShowcaseOptions:
     fullscreen: bool = False
     screen: int | None = None
     web_url: str | None = None
+    controls: bool = True
 
     @classmethod
     def from_request(cls, request: ShowcaseRequest) -> ShowcaseOptions:
@@ -104,6 +109,7 @@ class ShowcaseOptions:
             fullscreen=request.fullscreen,
             screen=request.screen,
             web_url=request.web_url,
+            controls=request.controls,
         )
 
 
@@ -113,8 +119,10 @@ class ScenarioResult:
 
     Args:
         scenario_id: Scenario ID
-        status: ``'done'``, ``'skipped'`` or ``'failed'``
-        message: Reason of the skip, or traceback of the failure
+        status: ``'done'``, ``'skipped'``, ``'failed'`` or ``'interrupted'`` (by
+         the operator)
+        message: Reason of the skip, traceback of the failure, or interruption
+         (``'next'``, ``'restart'`` or ``'stop'``)
     """
 
     scenario_id: str
@@ -262,7 +270,9 @@ class ShowcasePlayer:
         ShowcasePlayer.active = self
         demo_state = (execenv.demo_mode, execenv.unattended, execenv.delay)
         window_state = None
-        self.context = ctx = ShowcaseContext(self.win, self.options.speed)
+        self.context = ctx = ShowcaseContext(
+            self.win, self.options.speed, controls=self.options.controls
+        )
         try:
             window_state = self.__show_window()
             execenv.enable_demo_mode(self.dialog_delay)
@@ -278,15 +288,25 @@ class ShowcasePlayer:
         return self.results
 
     def __play_loops(self, ctx: ShowcaseContext) -> None:
-        """Play the scenarios once, or in a loop"""
+        """Play the scenarios once, or in a loop
+
+        A scenario interrupted by the operator to restart it is played again.
+        """
+        ctx.playlist_size = len(self.scenarios)
         while True:
-            for scenario in self.scenarios:
+            index = 0
+            while index < len(self.scenarios):
                 if ctx.stop_requested:
                     return
-                self.results.append(self.__play_scenario(ctx, scenario))
+                ctx.playlist_position = index + 1
+                result, reason = self.__play_scenario(ctx, self.scenarios[index])
+                self.results.append(result)
                 del self.results[:-MAX_RESULTS]
+                if reason != RESTART_DEMO:
+                    index += 1
             if ctx.stop_requested:
                 return
+            ctx.playlist_position = 0
             ctx.end_card()
             if not self.options.loop or ctx.stop_requested:
                 return
@@ -296,9 +316,15 @@ class ShowcasePlayer:
 
     def __play_scenario(
         self, ctx: ShowcaseContext, scenario: ShowcaseScenario
-    ) -> ScenarioResult:
-        """Play a scenario in a clean workspace, after its title card"""
+    ) -> tuple[ScenarioResult, str | None]:
+        """Play a scenario in a clean workspace, after its title card
+
+        Returns:
+            Result of the scenario, and its interruption by the operator (see
+             :meth:`ShowcaseContext.end_scenario`)
+        """
         logger.info("Showcase scenario: %s", scenario.id)
+        reason: str | None = None
         try:
             scenario.check_requirements()
             ctx.begin_scenario(scenario)
@@ -310,20 +336,39 @@ class ShowcasePlayer:
             scenario.run(ctx)
         except ScenarioSkipped as exc:
             logger.warning("Showcase scenario %s skipped: %s", scenario.id, exc)
-            return ScenarioResult(scenario.id, "skipped", str(exc))
+            result = ScenarioResult(scenario.id, "skipped", str(exc))
+        except ShowcaseInterrupted as exc:
+            result = self.__interrupted(ctx, scenario, exc.reason)
         except Exception:  # pylint: disable=broad-exception-caught
-            message = traceback.format_exc()
-            logger.error(
-                "Showcase scenario %s failed:%s%s", scenario.id, chr(10), message
-            )
-            try:
-                ctx.recover()
-            except Exception:  # pylint: disable=broad-exception-caught
-                logger.exception("Showcase recovery failed")
-            return ScenarioResult(scenario.id, "failed", message)
+            if ctx.interruption is not None:
+                # Failure caused by the interruption (e.g. a rejected dialog)
+                result = self.__interrupted(ctx, scenario, ctx.interruption)
+            else:
+                message = traceback.format_exc()
+                logger.error(
+                    "Showcase scenario %s failed:%s%s", scenario.id, chr(10), message
+                )
+                try:
+                    ctx.recover()
+                except ShowcaseInterrupted:
+                    pass
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logger.exception("Showcase recovery failed")
+                result = ScenarioResult(scenario.id, "failed", message)
+        else:
+            result = ScenarioResult(scenario.id, "done")
         finally:
-            ctx.end_scenario()
-        return ScenarioResult(scenario.id, "done")
+            reason = ctx.end_scenario()
+        return result, reason
+
+    @staticmethod
+    def __interrupted(
+        ctx: ShowcaseContext, scenario: ShowcaseScenario, reason: str
+    ) -> ScenarioResult:
+        """Return the result of a scenario interrupted by the operator"""
+        logger.info("Showcase scenario %s interrupted: %s", scenario.id, reason)
+        ctx.close_stray_windows()
+        return ScenarioResult(scenario.id, "interrupted", reason)
 
     def __show_window(self) -> tuple[QC.QByteArray, QC.Qt.WindowStates] | None:
         """Show the main window for the showcase

@@ -20,6 +20,7 @@ def test_missing_file_gives_the_defaults(tmp_path: Path) -> None:
     assert settings == ShowcaseSettings()
     assert settings.pace == "normal" and settings.fullscreen and not settings.loop
     assert settings.screen == -1 and settings.web_timeout == 15
+    assert settings.controls
 
 
 def test_settings_are_saved_and_loaded(tmp_path: Path) -> None:
@@ -35,6 +36,7 @@ def test_settings_are_saved_and_loaded(tmp_path: Path) -> None:
         web_url="http://localhost:5173/",
         web_ids="w1",
         web_timeout=5,
+        controls=False,
     )
     assert save_settings(settings, str(path))
     assert json.loads(path.read_text(encoding="utf-8"))["pace"] == "fast"
