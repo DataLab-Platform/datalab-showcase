@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-17
 
 - Finer operator controls during the showcase (closes [Issue #6](https://github.com/DataLab-Platform/datalab-showcase/issues/6)):
   - **F9** still pauses at the next pause point of the demo; pressing it again pauses now, even during a computation, a dialog or a macro.
