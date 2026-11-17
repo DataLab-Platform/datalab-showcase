@@ -82,8 +82,8 @@ msgstr "Sans « Nouveau groupe », les acquisitions s'accumulent dans le groupe 
 msgid "Discover more applications in the plugin catalog: %s"
 msgstr "Découvrez d'autres applications dans le catalogue de plugins : %s"
 
-msgid "Hotkeys: F9 to pause or resume, Shift+F12 to stop after the current demo."
-msgstr "Raccourcis : F9 pour mettre en pause ou reprendre, Maj+F12 pour arrêter après la démo en cours."
+msgid "Hotkeys: F9 to pause at the next pause point (twice: pause now, again: resume), Shift+F12 to stop after the current demo (twice: stop now), Right arrow or Page Down for the next step, End for the next demo, Home to restart the demo, + and - to change the pace."
+msgstr "Raccourcis : F9 pour faire une pause au prochain point de pause (deux fois : pause immédiate, encore : reprise), Maj+F12 pour arrêter après la démo en cours (deux fois : arrêt immédiat), flèche droite ou Page suivante pour l'étape suivante, Fin pour la démo suivante, Début pour recommencer la démo, + et - pour changer le rythme."
 
 msgid "Demos"
 msgstr "Démos"
@@ -105,6 +105,12 @@ msgstr "Rythme"
 
 msgid "Full screen"
 msgstr "Plein écran"
+
+msgid "Show the control bar"
+msgstr "Afficher la barre de contrôle"
+
+msgid "Show the control bar of the operator at the bottom of the window when the mouse moves: pause, next step, next demo, stop, pace and progress. The hotkeys work in any case."
+msgstr "Afficher la barre de contrôle de l'opérateur en bas de la fenêtre lorsque la souris bouge : pause, étape suivante, démo suivante, arrêt, rythme et progression. Les raccourcis fonctionnent dans tous les cas."
 
 msgid "Include DataLab Web"
 msgstr "Inclure DataLab Web"
@@ -134,15 +140,71 @@ msgstr "Le mode vitrine vide l'espace de travail (signaux, images, macros et his
 msgid "Do you want to continue?"
 msgstr "Souhaitez-vous vraiment continuer ?"
 
-msgid "Stopping after this demo"
-msgstr "Arrêt après cette démo"
+msgid "Restart the demo (Home)"
+msgstr "Recommencer la démo (Début)"
 
-msgid "Paused (F9 to resume)"
-msgstr "En pause (F9 pour reprendre)"
+msgid "Next step (Right arrow)"
+msgstr "Étape suivante (flèche droite)"
+
+msgid "Next demo (End)"
+msgstr "Démo suivante (Fin)"
+
+msgid "Cancel the stop"
+msgstr "Annuler l'arrêt"
+
+msgid "Cancel stop"
+msgstr "Annuler l'arrêt"
+
+msgid "Slower (-)"
+msgstr "Plus lent (-)"
+
+msgid "Faster (+)"
+msgstr "Plus rapide (+)"
+
+msgid "Elapsed time in this demo"
+msgstr "Temps écoulé dans cette démo"
+
+msgid "Resume (F9)"
+msgstr "Reprendre (F9)"
+
+msgid "Pause now (F9)"
+msgstr "Pause immédiate (F9)"
+
+msgid "Pause at the next pause point (F9), twice: pause now"
+msgstr "Pause au prochain point de pause (F9), deux fois : pause immédiate"
+
+msgid "Stop now (Shift+F12)"
+msgstr "Arrêt immédiat (Maj+F12)"
+
+msgid "Stop now"
+msgstr "Arrêt immédiat"
+
+msgid "Stop after this demo (Shift+F12)"
+msgstr "Arrêt après cette démo (Maj+F12)"
+
+#, python-format
+msgid "Demo %d/%d"
+msgstr "Démo %d/%d"
 
 #, python-format
 msgid "Step %d"
 msgstr "Étape %d"
+
+#, python-format
+msgid "Pace %s"
+msgstr "Rythme %s"
+
+msgid "Stopping..."
+msgstr "Arrêt en cours..."
+
+msgid "Stopping after this demo — Shift+F12 again: stop now"
+msgstr "Arrêt après cette démo — Maj+F12 à nouveau : arrêt immédiat"
+
+msgid "Paused (F9 to resume)"
+msgstr "En pause (F9 pour reprendre)"
+
+msgid "Pause requested — F9 again: pause now"
+msgstr "Pause demandée — F9 à nouveau : pause immédiate"
 
 msgid "Try DataLab"
 msgstr "Essayez DataLab"

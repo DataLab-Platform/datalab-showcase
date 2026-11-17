@@ -3,19 +3,33 @@
 """
 Showcase engine tests
 
-Waiting loops, captions, modal-dialog guard and warm-up of the processing worker.
+Waiting loops, captions, modal-dialog guard, warm-up of the processing worker and
+operator controls.
 """
 
 from __future__ import annotations
+
+import time
+from collections.abc import Callable
 
 import pytest
 from datalab.env import execenv
 from datalab.gui.processor.base import WorkerState
 from datalab.tests import datalab_test_app_context
+from guidata import qthelpers
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
-from datalab_showcase.showcase.engine import ShowcaseContext, process_events
+from datalab_showcase.showcase import ShowcaseOptions, ShowcasePlayer
+from datalab_showcase.showcase.engine import (
+    NEXT_DEMO,
+    RESTART_DEMO,
+    STOP_NOW,
+    ShowcaseContext,
+    ShowcaseInterrupted,
+    ShowcaseScenario,
+    process_events,
+)
 
 
 @pytest.mark.parametrize("speed", [0.0, 0.01])
@@ -169,3 +183,196 @@ def test_processing_worker_warm_up() -> None:
         win.signalpanel.new_object()
         win.signalpanel.processor.run_feature("absolute")
         assert len(win.signalpanel) == 2
+
+
+def _wait(seconds: float) -> None:
+    """Process events during a duration (s), as the main event loop would do"""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        process_events()
+        time.sleep(0.01)
+
+
+def _scenario(run: Callable[[ShowcaseContext], None] | None = None) -> ShowcaseScenario:
+    """Return a scenario for the tests of the operator controls"""
+    return ShowcaseScenario("test", "Test", run or (lambda _ctx: None))
+
+
+def test_pause_is_requested_then_immediate() -> None:
+    """F9 requests a pause, taking effect at the next pause point; F9 again pauses
+    now, at any checkpoint, without consuming the timeout of the waits"""
+    with datalab_test_app_context(console=False) as win:
+        with ShowcaseContext(win, 0.01) as ctx:
+            ctx.begin_scenario(_scenario())
+            ctx.toggle_pause()
+            assert ctx.paused and not ctx.pause_effective
+            # A requested pause does not stop a checkpoint
+            start = time.monotonic()
+            assert not ctx.wait_until(lambda: False, 0.1)
+            assert time.monotonic() - start < 0.4
+            ctx.toggle_pause()
+            assert ctx.pause_effective
+            QC.QTimer.singleShot(400, ctx.toggle_pause)
+            start = time.monotonic()
+            assert not ctx.wait_until(lambda: False, 0.1)
+            assert time.monotonic() - start >= 0.45
+            assert not ctx.paused and not ctx.pause_effective
+            ctx.end_scenario()
+
+
+def test_operator_interrupts_the_demos() -> None:
+    """Restart, next demo and stop now interrupt the scenario at its next
+    checkpoint: its cleanup is played instantly"""
+    played: list[str] = []
+
+    def first(ctx: ShowcaseContext) -> None:
+        played.append("first")
+        restart = played.count("first") == 1
+        QC.QTimer.singleShot(50, ctx.restart_demo if restart else ctx.next_demo)
+        try:
+            ctx.pause(1000.0)  # 10 s, unless interrupted
+            played.append("not interrupted")
+        finally:
+            start = time.monotonic()
+            ctx.pause(1000.0)
+            ctx.say("Cleanup")
+            played.append("cleanup" if time.monotonic() - start < 1.0 else "slow")
+
+    def second(ctx: ShowcaseContext) -> None:
+        played.append("second")
+        ctx.request_stop()
+        assert ctx.stop_requested and ctx.interruption is None
+        QC.QTimer.singleShot(50, ctx.request_stop)
+        ctx.pause(1000.0)
+        played.append("not stopped")
+
+    scenarios = [
+        ShowcaseScenario("first", "First", first),
+        ShowcaseScenario("second", "Second", second),
+    ]
+    start = time.monotonic()
+    with datalab_test_app_context(console=False) as win:
+        options = ShowcaseOptions(loop=True, speed=0.01)
+        results = ShowcasePlayer(win, scenarios, options).play()
+    assert time.monotonic() - start < 30.0
+    assert [(r.scenario_id, r.status, r.message) for r in results] == [
+        ("first", "interrupted", RESTART_DEMO),
+        ("first", "interrupted", NEXT_DEMO),
+        ("second", "interrupted", STOP_NOW),
+    ]
+    assert played == ["first", "cleanup", "first", "cleanup", "second"]
+
+
+def test_stop_can_be_cancelled() -> None:
+    """A stop after the demo can be cancelled, but not a stop now"""
+    with datalab_test_app_context(console=False) as win:
+        with ShowcaseContext(win, 0.01) as ctx:
+            ctx.begin_scenario(_scenario())
+            ctx.toggle_pause()
+            ctx.request_stop()
+            assert ctx.stop_requested and not ctx.paused
+            ctx.cancel_stop()
+            assert not ctx.stop_requested
+            ctx.request_stop()
+            ctx.request_stop()
+            ctx.cancel_stop()
+            assert ctx.stop_requested and ctx.interruption == STOP_NOW
+            with pytest.raises(ShowcaseInterrupted):
+                ctx.pause(1.0)
+            assert ctx.unwinding
+            assert ctx.end_scenario() == STOP_NOW
+
+
+def test_live_pace_and_next_step() -> None:
+    """The pace changes live, and the next step skips the current wait, then
+    fast-forwards to the next caption (pausing there, if paused)"""
+    with datalab_test_app_context(console=False) as win:
+        ShowcaseContext(win, 0.0).change_pace(faster=True)  # Nothing in check mode
+        with ShowcaseContext(win, 1.0) as ctx:
+            ctx.change_pace(faster=True)
+            assert ctx.speed == 0.7
+            for _index in range(5):
+                ctx.change_pace(faster=True)
+            assert ctx.speed == ctx.PACE_FACTORS[-1]
+            ctx.change_pace(faster=False)
+            assert ctx.speed == 0.7
+            ctx.begin_scenario(_scenario())
+            QC.QTimer.singleShot(100, ctx.next_step)
+            start = time.monotonic()
+            ctx.pause(30.0)
+            assert time.monotonic() - start < 5.0
+            # Fast-forward to the next caption
+            start = time.monotonic()
+            ctx.pause(2.0)
+            assert time.monotonic() - start < 1.0
+            ctx.say("Step", hold=0.0)
+            start = time.monotonic()
+            ctx.pause(0.5)
+            assert time.monotonic() - start >= 0.3
+            # While paused: pause again at the next caption
+            ctx.toggle_pause()
+            ctx.toggle_pause()
+            QC.QTimer.singleShot(100, ctx.next_step)
+            QC.QTimer.singleShot(700, ctx.toggle_pause)
+            step = ctx.step
+            start = time.monotonic()
+            ctx.pause(0.0)
+            ctx.say("Next step", hold=0.0)
+            assert time.monotonic() - start >= 0.6
+            assert ctx.step == step + 1 and not ctx.paused
+            ctx.end_scenario()
+
+
+def test_demo_mode_does_not_close_dialogs_while_paused() -> None:
+    """While paused, the dialogs closed by the demo mode of DataLab stay open"""
+    original = qthelpers.close_dialog_and_quit
+    with datalab_test_app_context(console=False) as win:
+        dialog = QW.QDialog(win)
+        try:
+            with ShowcaseContext(win, 0.01) as ctx:
+                assert qthelpers.close_dialog_and_quit is not original
+                dialog.show()
+                ctx.toggle_pause()
+                ctx.toggle_pause()
+                qthelpers.close_dialog_and_quit(dialog)
+                _wait(0.4)
+                assert dialog.isVisible()
+                ctx.toggle_pause()
+                _wait(0.4)
+                assert not dialog.isVisible()
+            assert qthelpers.close_dialog_and_quit is original
+        finally:
+            dialog.deleteLater()
+            process_events()
+
+
+@pytest.mark.parametrize("controls", [True, False])
+def test_control_bar(controls: bool) -> None:
+    """The control bar shows the state and the progress of the showcase, unless
+    disabled"""
+    with datalab_test_app_context(console=False) as win:
+        with ShowcaseContext(win, 1.0, controls=controls) as ctx:
+            ctx.playlist_position, ctx.playlist_size = 2, 3
+            ctx.begin_scenario(_scenario())
+            ctx.show_controls()
+            bar = ctx.control_bar
+            if not controls:
+                assert bar is None
+                return
+            assert bar is not None and bar.isVisible()
+            assert "Test" in bar.progress_label.text()
+            assert bar.dots_label.text() == "○ ● ○"
+            assert bar.pace_label.text() == "×1"
+            assert not bar.cancel_stop_button.isVisible()
+            bar.faster_button.click()
+            assert ctx.speed == 0.7 and bar.pace_label.text() == "×1.4"
+            bar.pause_button.click()
+            assert ctx.paused and bar.pause_button.property("active")
+            bar.stop_button.click()
+            assert ctx.stop_requested and not ctx.paused
+            assert bar.cancel_stop_button.isVisible()
+            bar.cancel_stop_button.click()
+            assert not ctx.stop_requested
+            assert not bar.cancel_stop_button.isVisible()
+            ctx.end_scenario()
+        assert not bar.isVisible()

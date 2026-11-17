@@ -14,6 +14,8 @@ The plugin reads its options on the command line of DataLab itself, e.g.
 - ``--showcase-screen=1``: index of the screen showing the showcase (0: first
   screen)
 - ``--showcase-fullscreen``: show DataLab in full screen
+- ``--showcase-no-controls``: never show the control bar of the operator (the
+  hotkeys still work)
 - ``--showcase-web``, ``--showcase-web=URL``: end each loop with one pass of the
   DataLab Web showcase, in a browser window
 
@@ -43,11 +45,13 @@ SPEED_OPTION = "--showcase-speed"
 SCREEN_OPTION = "--showcase-screen"
 #: Option showing DataLab in full screen
 FULLSCREEN_OPTION = "--showcase-fullscreen"
+#: Option hiding the control bar of the operator
+NO_CONTROLS_OPTION = "--showcase-no-controls"
 #: Option ending each loop with the DataLab Web interlude (``--showcase-web=URL``)
 WEB_OPTION = "--showcase-web"
 
 #: Options without value
-FLAG_OPTIONS = (LOOP_OPTION, FULLSCREEN_OPTION)
+FLAG_OPTIONS = (LOOP_OPTION, FULLSCREEN_OPTION, NO_CONTROLS_OPTION)
 #: Options requiring a value
 VALUE_OPTIONS = (SPEED_OPTION, SCREEN_OPTION)
 #: Options with an optional value
@@ -72,6 +76,8 @@ class ShowcaseRequest:
         fullscreen: True to show DataLab in full screen
         web_url: URL of the DataLab Web showcase, to end each loop with it (None:
          no DataLab Web interlude)
+        controls: True to show the control bar of the operator when the mouse
+         moves
     """
 
     scenarios: str = "all"
@@ -80,6 +86,7 @@ class ShowcaseRequest:
     screen: int | None = None
     fullscreen: bool = False
     web_url: str | None = None
+    controls: bool = True
 
 
 @dataclass
@@ -196,6 +203,7 @@ def parse_arguments(arguments: Sequence[str]) -> ParsedArguments:
         screen=values.get(SCREEN_OPTION),
         fullscreen=bool(values.get(FULLSCREEN_OPTION, False)),
         web_url=None if web_url is None else (str(web_url) or DEFAULT_WEB_URL),
+        controls=not values.get(NO_CONTROLS_OPTION, False),
     )
     return result
 

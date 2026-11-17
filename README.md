@@ -61,6 +61,7 @@ DataLab.exe --showcase --showcase-loop --showcase-fullscreen
 | `--showcase-screen=N` | Index of the screen showing DataLab (`0` for the first screen) |
 | `--showcase-fullscreen` | Show DataLab in full screen during the showcase |
 | `--showcase-web`, `--showcase-web=URL` | End each loop with one pass of the DataLab Web showcase, in a browser window (see [DataLab Web on the same booth](#datalab-web-on-the-same-booth)) |
+| `--showcase-no-controls` | Never show the control bar of the operator (see [Operator controls](#operator-controls)) |
 
 > **Always give a value with `=`** (`--showcase=d1`, `--showcase-speed=0.7`), never as a separate argument (`--showcase d1`). These options belong to the plugin, not to DataLab: DataLab ignores them, but it takes the first argument which is not an option as an HDF5 file to open. With `--showcase d1`, DataLab tries to open a file named `d1` and shows an error message: the showcase waits until this message is closed, then plays all the demos (it never uses such a separated value), and logs a warning telling how to write the option.
 
@@ -68,12 +69,20 @@ With the Python package, the `datalab-showcase` command starts DataLab and plays
 
 The showcase starts once DataLab is ready: its main window is shown and no startup question is pending. The question about the log files of a previous session which ended abnormally is not asked when the showcase is requested on the command line, so that an unattended booth computer does not wait for an answer. Other startup questions, if any, delay the showcase until they are answered.
 
-### Operator hotkeys
+### Operator controls
 
 While the showcase plays, the operator may use the following keys:
 
-- **F9**: pause or resume the showcase,
-- **Shift+F12**, or **Esc** twice quickly: stop the showcase after the current demo.
+| Key | Action |
+| --- | --- |
+| **F9** | Pause at the next pause point of the demo (the end of a caption), or resume. Press **F9** again to pause now, e.g. during a computation or a dialog: running macros and remote-control clients are suspended too |
+| **→** or **Page Down** | Next step: skip the current wait, then fast-forward to the next caption (where the showcase stops if it was paused) |
+| **End** | Next demo: the current demo is interrupted, and its cleanup is played instantly |
+| **Home** | Restart the current demo |
+| **+** / **−** | Faster or slower pace, with no need to restart the showcase |
+| **Shift+F12**, or **Esc** twice quickly | Stop the showcase after the current demo. Press again to stop now |
+
+A discreet control bar appears at the bottom of the window when the mouse moves, and hides itself after a few seconds without move. It shows the progress of the showcase (demo, step and elapsed time) and the pace, and gives the same commands, plus **Cancel stop** while a stop after the demo is pending. The bar may be disabled with the **Show the control bar** option of the dialog, or with `--showcase-no-controls`; the keys work in any case.
 
 Once the showcase is stopped, or once all the demos have been played (without loop), DataLab is given back for a live demonstration: the window gets its previous state back, and the dialogs are no longer accepted automatically.
 

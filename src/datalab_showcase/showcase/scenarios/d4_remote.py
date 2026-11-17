@@ -243,6 +243,11 @@ class ClientProcess(QC.QObject):
         return self.__process is not None and self.__process.poll() is not None
 
     @property
+    def pid(self) -> int | None:
+        """Identifier of the client process (None before it is started)"""
+        return None if self.__process is None else self.__process.pid
+
+    @property
     def returncode(self) -> int | None:
         """Exit code of the client process (None while running)"""
         return None if self.__process is None else self.__process.poll()

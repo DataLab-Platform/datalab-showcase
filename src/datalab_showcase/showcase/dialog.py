@@ -72,8 +72,11 @@ class ShowcaseDialog(QW.QDialog):
             )
             + "<br><br>"
             + _(
-                "Hotkeys: F9 to pause or resume, Shift+F12 to stop after the "
-                "current demo."
+                "Hotkeys: F9 to pause at the next pause point (twice: pause "
+                "now, again: resume), Shift+F12 to stop after the current demo "
+                "(twice: stop now), Right arrow or Page Down for the next step, "
+                "End for the next demo, Home to restart the demo, + and - to "
+                "change the pace."
             ),
             self,
         )
@@ -111,6 +114,16 @@ class ShowcaseDialog(QW.QDialog):
         self.fullscreen_check = QW.QCheckBox(_("Full screen"), self)
         self.fullscreen_check.setChecked(settings.fullscreen)
         form.addRow(self.fullscreen_check)
+        self.controls_check = QW.QCheckBox(_("Show the control bar"), self)
+        self.controls_check.setToolTip(
+            _(
+                "Show the control bar of the operator at the bottom of the window "
+                "when the mouse moves: pause, next step, next demo, stop, pace "
+                "and progress. The hotkeys work in any case."
+            )
+        )
+        self.controls_check.setChecked(settings.controls)
+        form.addRow(self.controls_check)
         self.web_check = QW.QCheckBox(_("Include DataLab Web"), self)
         self.web_check.setToolTip(
             _(
@@ -194,6 +207,7 @@ class ShowcaseDialog(QW.QDialog):
         settings.loop = self.loop_check.isChecked()
         settings.pace = pace
         settings.fullscreen = self.fullscreen_check.isChecked()
+        settings.controls = self.controls_check.isChecked()
         screen = self.__get_screen()
         if self.screen_combo is not None:
             settings.screen = -1 if screen is None else screen
@@ -210,6 +224,7 @@ class ShowcaseDialog(QW.QDialog):
             web_url=(web_url or web_interlude.DEFAULT_URL)
             if self.web_check.isChecked()
             else None,
+            controls=self.controls_check.isChecked(),
         )
 
 

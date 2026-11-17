@@ -34,6 +34,7 @@ from datalab_showcase.showcase.dialog import (
 from datalab_showcase.showcase.engine import (
     ScenarioSkipped,
     ShowcaseContext,
+    ShowcaseInterrupted,
     ShowcaseScenario,
 )
 from datalab_showcase.showcase.player import (
@@ -51,6 +52,7 @@ __all__ = [
     "ScenarioSkipped",
     "ShowcaseContext",
     "ShowcaseDialog",
+    "ShowcaseInterrupted",
     "ShowcaseOptions",
     "ShowcasePlayer",
     "ShowcaseScenario",
