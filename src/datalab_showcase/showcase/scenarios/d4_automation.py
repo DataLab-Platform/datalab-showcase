@@ -233,7 +233,12 @@ def play_macro(ctx: ShowcaseContext) -> None:
                 ),
                 hold=3.5,
             )
-        with remote_control_server(ctx):
+        with (
+            remote_control_server(ctx),
+            ctx.pausable_process(
+                lambda: macro.process.processId() if macro.process is not None else None
+            ),
+        ):
             finished: list[bool] = []
             macro.FINISHED.connect(lambda: finished.append(True))
             count = len(win.signalpanel)
@@ -337,20 +342,21 @@ def play_client(ctx: ShowcaseContext, url: str, token: str) -> None:
         client.SIG_OUTPUT.connect(show_line)
         console.popup()
     try:
-        client.start()
-        timeout = CLIENT_TIMEOUT + ACQUISITION_COUNT * ctx.speed
-        ctx.wait_until(lambda: client.has_line("PUT ") or client.finished, timeout)
-        ctx.say(
-            _("The client sends %d noisy acquisitions, one per second...")
-            % ACQUISITION_COUNT,
-            hold=0.5,
-        )
-        ctx.wait_until(lambda: client.has_line("POST ") or client.finished, timeout)
-        ctx.say(
-            _("...then asks DataLab for their average, and retrieves the result"),
-            hold=1.0,
-        )
-        done = ctx.wait_until(lambda: client.finished, timeout)
+        with ctx.pausable_process(lambda: client.pid):
+            client.start()
+            timeout = CLIENT_TIMEOUT + ACQUISITION_COUNT * ctx.speed
+            ctx.wait_until(lambda: client.has_line("PUT ") or client.finished, timeout)
+            ctx.say(
+                _("The client sends %d noisy acquisitions, one per second...")
+                % ACQUISITION_COUNT,
+                hold=0.5,
+            )
+            ctx.wait_until(lambda: client.has_line("POST ") or client.finished, timeout)
+            ctx.say(
+                _("...then asks DataLab for their average, and retrieves the result"),
+                hold=1.0,
+            )
+            done = ctx.wait_until(lambda: client.finished, timeout)
         client.poll()
         output = "\n".join(client.lines[-20:])
         ctx.checkpoint(done, "Client still running after the timeout:\n" + output)

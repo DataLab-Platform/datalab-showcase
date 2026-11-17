@@ -566,7 +566,9 @@ def wait_for_browser(
     """Wait for the browser process to end
 
     The waiting time is frozen while the operator pauses the showcase (F9). When
-    the operator stops the showcase (Shift+F12), the waiting ends at once.
+    the operator stops the showcase (Shift+F12), the waiting ends at once. When the
+    operator interrupts the scenario (e.g. next demo), :class:`ShowcaseInterrupted`
+    is raised.
 
     Args:
         ctx: Showcase context
@@ -575,13 +577,15 @@ def wait_for_browser(
 
     Returns:
         False after the timeout, True otherwise
+
+    Raises:
+        ShowcaseInterrupted: If the operator interrupted the scenario
     """
     end = time.monotonic() + timeout
     while browser.is_running() and not ctx.stop_requested:
-        if ctx.paused:
-            remaining = end - time.monotonic()
-            ctx.wait_while_paused()
-            end = time.monotonic() + remaining
+        start = time.monotonic()
+        ctx.wait_while_paused()
+        end += time.monotonic() - start
         if time.monotonic() >= end:
             return False
         process_events()

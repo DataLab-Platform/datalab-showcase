@@ -27,6 +27,7 @@ def test_all_options_with_equal_sign() -> None:
             "--showcase-screen=1",
             "--showcase-fullscreen",
             "--showcase-web=http://localhost:5173/",
+            "--showcase-no-controls",
             "--unattended",
         ]
     )
@@ -38,12 +39,14 @@ def test_all_options_with_equal_sign() -> None:
         screen=1,
         fullscreen=True,
         web_url="http://localhost:5173/",
+        controls=False,
     )
 
 
 def test_defaults() -> None:
     """``--showcase`` alone plays all the demos once, at normal pace"""
     assert parse_arguments(["--showcase"]).request == ShowcaseRequest()
+    assert ShowcaseRequest().controls
     assert parse_arguments(["--showcase="]).request == ShowcaseRequest()
     assert parse_arguments(["--showcase=all"]).request == ShowcaseRequest()
     request = parse_arguments(["--showcase", "--showcase-web"]).request
@@ -93,6 +96,7 @@ def test_value_options_require_an_equal_sign(option: str) -> None:
         "--showcase-screen=-2",
         "--showcase-loop=yes",
         "--showcase-fullscreen=0",
+        "--showcase-no-controls=1",
         "--showcase-unknown",
     ],
 )

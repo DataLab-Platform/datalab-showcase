@@ -49,6 +49,8 @@ class ShowcaseSettings:
          interlude (empty: all the demos)
         web_timeout: Maximum duration (minutes) of the DataLab Web interlude: the
          browser window is closed afterwards
+        controls: True to show the control bar of the operator when the mouse
+         moves
     """
 
     excluded_scenarios: list[str] = field(default_factory=list)
@@ -60,6 +62,7 @@ class ShowcaseSettings:
     web_url: str = ""
     web_ids: str = ""
     web_timeout: int = 15
+    controls: bool = True
 
     @classmethod
     def from_dict(cls, data: object) -> ShowcaseSettings:

@@ -17,7 +17,7 @@ PLUGIN_DESCRIPTION = (
 )
 PLUGIN_ID = "org.datalab.showcase"
 PLUGIN_NAME = "DataLab Showcase"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "PLUGIN_DESCRIPTION",
